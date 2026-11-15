@@ -27,6 +27,141 @@ function showToast(message, kind = 'info') {
   toastTimer = setTimeout(() => toast.classList.remove('is-visible'), 3200);
 }
 
+function createRecordDialog(title, description) {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'name-dialog record-dialog';
+  const form = document.createElement('form');
+  form.method = 'dialog';
+  form.className = 'name-dialog-form';
+  const kicker = document.createElement('div');
+  kicker.className = 'dialog-kicker';
+  kicker.textContent = 'LOCAL WORKSPACE RECORDS';
+  const heading = document.createElement('h2');
+  heading.textContent = title;
+  const note = document.createElement('p');
+  note.textContent = description;
+  const content = document.createElement('div');
+  content.className = 'record-dialog-content';
+  const actions = document.createElement('div');
+  actions.className = 'dialog-actions';
+  const close = document.createElement('button');
+  close.className = 'button button-outline';
+  close.textContent = 'Close';
+  actions.append(close);
+  form.append(kicker, heading, note, content, actions);
+  dialog.append(form);
+  dialog.addEventListener('close', () => dialog.remove());
+  document.body.append(dialog);
+  dialog.showModal();
+  return { dialog, content };
+}
+
+async function showVersionHistory() {
+  const { versions } = await api(`/api/rulesets/${encodeURIComponent(state.ruleset.id)}/versions`);
+  const { content } = createRecordDialog('Saved versions', 'These immutable graph snapshots belong to this local workspace.');
+  if (!versions.length) {
+    const empty = document.createElement('p');
+    empty.className = 'panel-empty';
+    empty.textContent = 'No saved versions yet.';
+    content.append(empty);
+    return;
+  }
+  for (const version of versions) {
+    const row = document.createElement('div');
+    row.className = 'record-row';
+    const detail = document.createElement('div');
+    const name = document.createElement('strong');
+    name.textContent = `Version ${version.versionNumber} · revision ${version.sourceRevision}`;
+    const hash = document.createElement('small');
+    hash.textContent = `SHA-256 consistency hash ${version.graphHash.slice(0, 16)}… · ${new Date(version.createdAt).toLocaleString()}`;
+    detail.append(name, hash);
+    const replay = document.createElement('button');
+    replay.className = 'button button-outline';
+    replay.textContent = 'Replay';
+    replay.addEventListener('click', () => {
+      document.querySelector('dialog.name-dialog[open]')?.close();
+      replayVersion(version.id).catch((error) => showToast(`Could not load saved version: ${error.message}`, 'error'));
+    });
+    row.append(detail, replay);
+    content.append(row);
+  }
+}
+
+async function replayVersion(versionId) {
+  const { version } = await api(`/api/rulesets/${encodeURIComponent(state.ruleset.id)}/versions/${encodeURIComponent(versionId)}`);
+  const { content } = createRecordDialog(`Replay version ${version.versionNumber}`, `Test the saved graph from revision ${version.sourceRevision}.`);
+  const controls = new Map();
+  for (const field of version.graph.schema) {
+    const label = document.createElement('label');
+    label.className = 'test-field';
+    const caption = document.createElement('span');
+    caption.textContent = `${field.name}${field.required === false ? ' (optional)' : ''} · ${field.type}`;
+    let control;
+    if (field.type === 'enum' || field.type === 'boolean') {
+      control = document.createElement('select');
+      const empty = document.createElement('option');
+      empty.value = '';
+      empty.textContent = 'Choose…';
+      control.append(empty);
+      const options = field.type === 'boolean' ? [['true', 'True'], ['false', 'False']] : field.options.map((item) => [item, item]);
+      for (const [value, text] of options) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = text;
+        control.append(option);
+      }
+    } else {
+      control = document.createElement('input');
+      control.type = field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text';
+    }
+    control.className = 'form-control';
+    controls.set(field.name, { control, type: field.type });
+    label.append(caption, control);
+    content.append(label);
+  }
+  const output = document.createElement('pre');
+  output.className = 'replay-result';
+  const run = document.createElement('button');
+  run.type = 'button';
+  run.className = 'button button-primary';
+  run.textContent = 'Evaluate saved version';
+  run.addEventListener('click', async () => {
+    const input = {};
+    for (const [name, { control, type }] of controls) {
+      if (control.value !== '') input[name] = parseTypedValue(control, type);
+    }
+    try {
+      const result = await api(`/api/rulesets/${encodeURIComponent(state.ruleset.id)}/versions/${encodeURIComponent(version.id)}/evaluate`, { method: 'POST', body: JSON.stringify({ input }) });
+      output.textContent = JSON.stringify(result.ok ? { result: result.result, trace: result.trace } : { errors: result.errors }, null, 2);
+    } catch (error) { output.textContent = error.message; }
+  });
+  content.append(run, output);
+}
+
+async function showProjectActivity() {
+  const { events } = await api(`/api/projects/${encodeURIComponent(state.project.id)}/audit`);
+  const { content } = createRecordDialog('Project activity', 'Local event history; actor is recorded as “local workspace”.');
+  if (!events.length) {
+    const empty = document.createElement('p');
+    empty.className = 'panel-empty';
+    empty.textContent = 'No activity recorded yet.';
+    content.append(empty);
+    return;
+  }
+  for (const event of events) {
+    const row = document.createElement('div');
+    row.className = 'record-row record-row-activity';
+    const detail = document.createElement('div');
+    const type = document.createElement('strong');
+    type.textContent = event.type;
+    const when = document.createElement('small');
+    when.textContent = `${event.actor} · ${new Date(event.occurredAt).toLocaleString()} · ${JSON.stringify(event.details)}`;
+    detail.append(type, when);
+    row.append(detail);
+    content.append(row);
+  }
+}
+
 function askForName(kind) {
   return new Promise((resolveName) => {
     const project = kind === 'project';
@@ -192,7 +327,7 @@ function renderProject() {
   const rulesets = state.project.rulesets ?? [];
   app.innerHTML = shell(`<section class="page-wrap project-page">
     <button class="back-link" data-action="dashboard">← All projects</button>
-    <div class="page-heading project-heading"><div><p class="eyebrow">PROJECT</p><h1>${escapeHtml(state.project.name)}</h1><p class="lede">Create a rule set and shape the path from input to outcome.</p></div><button class="button button-primary" data-action="new-ruleset"><span class="plus">+</span> New rule set</button></div>
+    <div class="page-heading project-heading"><div><p class="eyebrow">PROJECT</p><h1>${escapeHtml(state.project.name)}</h1><p class="lede">Create a rule set and shape the path from input to outcome.</p></div><div class="project-heading-actions"><button class="button button-outline" data-action="activity">Activity</button><button class="button button-primary" data-action="new-ruleset"><span class="plus">+</span> New rule set</button></div></div>
     <div class="section-row"><div><h2>Rule sets <span class="count-pill">${rulesets.length}</span></h2><p class="section-note">Drafts can be edited and saved as you work.</p></div></div>
     <div class="ruleset-list">${rulesets.length ? rulesets.map((ruleset) => `<button class="ruleset-card" data-ruleset="${escapeHtml(ruleset.id)}"><span class="ruleset-icon">◇</span><span class="ruleset-main"><strong>${escapeHtml(ruleset.name)}</strong><small>${escapeHtml(ruleset.status === 'versioned' ? `Version ${ruleset.latestVersionNumber} saved` : 'Draft')} · Revision ${ruleset.revision} · ${ruleset.versionCount} saved version${ruleset.versionCount === 1 ? '' : 's'} · Updated ${new Date(ruleset.updatedAt).toLocaleString()}</small></span><span class="ruleset-arrow">→</span></button>`).join('') : `<div class="empty-inline"><span class="empty-inline-icon">◇</span><div><strong>No rule sets yet</strong><p>Create one to open the graph editor.</p></div><button class="button button-secondary" data-action="new-ruleset">Create rule set</button></div>`}</div>
   </section>`);
@@ -664,10 +799,8 @@ app.addEventListener('click', async (event) => {
       if (state.dirty) { showToast('Save the draft before creating a version.', 'error'); return; }
       const data = await api(`/api/rulesets/${encodeURIComponent(state.ruleset.id)}/versions`, { method: 'POST', body: JSON.stringify({ expectedRevision: state.revision }) });
       showToast(`Saved immutable version ${data.version.versionNumber}.`, 'success');
-    } else if (action === 'versions') {
-      const { versions } = await api(`/api/rulesets/${encodeURIComponent(state.ruleset.id)}/versions`);
-      showToast(versions.length ? versions.map((version) => `v${version.versionNumber} · ${version.graphHash.slice(0, 12)}`).join(' | ') : 'No saved versions yet.', 'info');
-    }
+    } else if (action === 'versions') await showVersionHistory();
+    else if (action === 'activity') await showProjectActivity();
     else if (action === 'undo') applyHistory('undo');
     else if (action === 'redo') applyHistory('redo');
     else if (action === 'validate') await validateDraft();

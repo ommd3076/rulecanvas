@@ -32,6 +32,15 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .name-dialog label { display: block; margin-bottom: 6px; color: #68776e; font-size: 10px; font-weight: 640; }
 .name-dialog .form-control { min-height: 39px; }
 .dialog-actions { display: flex; justify-content: end; gap: 8px; margin-top: 20px; }
+.record-dialog { width: min(620px, calc(100% - 32px)); max-height: min(760px, calc(100% - 32px)); overflow: auto; }
+.record-dialog-content { display: grid; gap: 10px; max-height: 55vh; overflow: auto; }
+.record-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px; border: 1px solid #e7eee9; border-radius: 10px; background: #fbfdfb; }
+.record-row strong, .record-row small { display: block; }
+.record-row strong { color: #405349; font-size: 12px; }
+.record-row small { margin-top: 4px; color: #89958e; font-size: 10px; line-height: 1.5; }
+.record-row-activity { justify-content: start; }
+.replay-result { max-height: 220px; overflow: auto; margin: 0; padding: 12px; border-radius: 8px; color: #52675b; background: #f4f8f5; font-size: 10px; white-space: pre-wrap; }
+.project-heading-actions { display: flex; gap: 8px; }
 .app-shell { min-height: 100vh; display: grid; grid-template-columns: 238px minmax(0, 1fr); }
 .sidebar { background: #fff; border-right: 1px solid #e7efeb; padding: 26px 18px 18px; display: flex; flex-direction: column; min-height: 100vh; }
 .brand { border: 0; background: transparent; display: flex; align-items: center; gap: 11px; padding: 0 9px; font-weight: 760; font-size: 17px; letter-spacing: -.04em; cursor: pointer; }
@@ -296,6 +305,8 @@ h1 { margin: 0; font-size: clamp(26px, 3vw, 36px); line-height: 1.1; letter-spac
   .page-wrap { padding: 28px 17px 40px; }
   .page-heading { align-items: start; flex-direction: column; margin-bottom: 32px; }
   .project-heading { align-items: start; }
+  .project-heading-actions { width: 100%; }
+  .project-heading-actions .button { flex: 1; }
   .page-heading > .button { align-self: stretch; }
   .section-row { align-items: start; flex-direction: column; }
   .search-box { width: 100%; }
@@ -303,7 +314,7 @@ h1 { margin: 0; font-size: clamp(26px, 3vw, 36px); line-height: 1.1; letter-spac
   .project-card { min-height: 155px; }
   .editor-toolbar { height: auto; min-height: 70px; padding: 10px 12px; align-items: start; flex-direction: column; }
   .editor-title input { width: 215px; }
-  .editor-actions { width: 100%; justify-content: end; }
+  .editor-actions { width: 100%; justify-content: end; flex-wrap: wrap; }
   .save-status { margin-right: auto; }
   .editor-workspace { display: flex; flex-direction: column; }
   .editor-left { order: 2; border-right: 0; border-top: 1px solid var(--line); }

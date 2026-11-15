@@ -15,6 +15,7 @@ RuleCanvas is a visual workbench for building, validating, and evaluating determ
 - Reject stale concurrent draft writes with a revision conflict instead of silently overwriting.
 - Save valid drafts as immutable, locally stored graph versions with SHA-256 consistency hashes; replay a chosen version independently from later draft edits. Hashes can detect accidental or one-sided changes, but are not authentication or tamper-proof protection against someone who can edit the local data file.
 - Record local project and ruleset creation, draft-save, and version-save events for inspection through the API.
+- Inspect saved versions and project activity in the app, and replay a saved version with its own typed input form.
 - Keep node coordinates as layout metadata; evaluation semantics use node and edge data only.
 
 ## Run locally
