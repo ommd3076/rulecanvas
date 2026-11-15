@@ -285,7 +285,7 @@ function renderEditorHeaderState() {
     } else if (state.dirty) {
       status.textContent = 'Unsaved changes';
     } else {
-      status.textContent = `Saved · v${state.revision}`;
+      status.innerHTML = `Saved · <button type="button" class="version-tag" data-action="versions" title="View version history">v${escapeHtml(String(state.revision))}</button>`;
     }
     status.dataset.state = state.dirty ? state.saveState : 'saved';
   }
@@ -363,15 +363,8 @@ function renderFloatingPillNav() {
       id: 'canvas',
       label: 'Canvas',
       action: 'stay-canvas',
-      count: state.graph ? `${state.graph.nodes.length} nodes` : undefined,
+      count: undefined,
       active: true
-    });
-    navItems.push({
-      id: 'versions',
-      label: 'Versions',
-      action: 'versions',
-      count: `v${state.revision}`,
-      active: false
     });
   }
   if (state.project) {
@@ -429,7 +422,7 @@ function shell(content, active = 'projects') {
               <button id="undo-button" class="history-button" data-action="undo" aria-label="Undo" title="Undo (Ctrl+Z)" disabled>↶</button>
               <button id="redo-button" class="history-button" data-action="redo" aria-label="Redo" title="Redo (Ctrl+Y)" disabled>↷</button>
             </div>
-            <span id="save-status" class="save-status" data-state="${state.dirty ? 'unsaved' : 'saved'}">${state.dirty ? 'Unsaved changes' : `Saved · v${state.revision}`}</span>
+            <span id="save-status" class="save-status" data-state="${state.dirty ? 'unsaved' : 'saved'}">${state.dirty ? 'Unsaved changes' : `Saved · <button type="button" class="version-tag" data-action="versions" title="View version history">v${state.revision}</button>`}</span>
             <button id="validate-button" class="button button-outline button-sm" data-action="validate" title="Validate graph">Validate</button>
             <button class="button button-outline button-sm" data-action="export-draft" title="Export draft JSON">Export</button>
             <button class="button button-outline button-sm" data-action="import-draft" title="Import draft JSON">Import</button>

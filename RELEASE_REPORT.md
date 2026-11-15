@@ -46,6 +46,16 @@ The test suite stands at **42 passing tests**, running in ~650ms. Syntax checkin
 - **Draft Preservation:** Local drafts remain intact in memory upon 5xx/network errors, displaying a dedicated `Retry save` button.
 - **Conflict Management:** HTTP 409 revision conflicts retain the unsaved draft in the editor, present a one-click local JSON download (`rulecanvas-conflict-<id>.json`), and warn on navigation via `beforeunload`.
 
+### 1351px Desktop Spacing & Redundant Control Cleanup
+- **Issue:** On a 1351px desktop viewport, the centered floating pill navigation crowded the left breadcrumb path (truncating `"RuleCanvas Acceptance"` into `"RuleCa…"`), while `"Versions"` appeared redundantly in both the floating pill bar and the editor header actions.
+- **Resolution:**
+  1. Compacted the brand mark and subtitle by stacking `"RuleCanvas"` and `"BY ENNORM"` vertically, reducing horizontal brand footprint by over 100px.
+  2. Relaxed `max-width` on `.nav-trail-link` to 240px and refined `.topbar-ruleset-input` width to 140px, allowing full project and ruleset names (e.g. `"RuleCanvas Acceptance"` and `"Boundary decision"`) to render completely without ellipsis.
+  3. Eliminated duplicate `"Versions"` pill from the floating navigation bar in the editor view. Replaced redundant version buttons with a single unified, clickable version tag badge (`Saved · v14`) in the save status line for viewing version history, paired with the `Save version` button for creating immutable version snapshots.
+  4. Streamlined `Canvas` pill in the editor header, removing the redundant node count badge that was already displayed on the canvas secondary toolbar directly below.
+  5. Refined responsive layout at `<= 1200px` so tablet viewports neatly stack the floating pill nav into a dedicated second tier, completely eliminating squeeze or truncation across all desktop and tablet resolutions.
+- **Evidence:** Verified via headless Edge CDP screenshot and DOM bounding rect metrics across 1920px, 1351px, 1200px, 1024px, 768px, and 390px with `document.documentElement.scrollWidth === clientWidth` (`overflow: none`) and confirmed visually.
+
 ### Decisive Visual Workspace Redesign (AI Studio Reference Integration)
 - **Elimination of Redundant Sidebar & Stacked Toolbars:**
   - Removed the legacy 238px sidebar that duplicated the top floating pill navigation, freeing up screen width for the decision canvas.
