@@ -381,8 +381,8 @@ function renderCanvasMarkup() {
     const safeType = ['start', 'condition', 'outcome'].includes(node.type) ? node.type : 'unknown';
     const className = `graph-node node-${safeType}${selected ? ' is-selected' : ''}`;
     return `<g class="${className}" data-node="${escapeHtml(node.id)}" transform="translate(${escapeHtml(safeSvgNumber(Number(node.x)))} ${escapeHtml(safeSvgNumber(Number(node.y)))})" tabindex="0" role="group" aria-label="${escapeHtml(typeLabel)}: ${escapeHtml(getNodeLabel(node))}">
-      ${node.type !== 'start' ? `<circle class="port port-in" data-port-kind="in" data-node="${escapeHtml(node.id)}" cx="0" cy="66" r="7" tabindex="0" role="button" aria-label="Connect into ${escapeHtml(getNodeLabel(node))}"/>` : ''}
       <rect class="node-surface" width="220" height="132" rx="16"/>
+      ${node.type !== 'start' ? `<circle class="port port-in" data-port-kind="in" data-node="${escapeHtml(node.id)}" cx="0" cy="66" r="7" tabindex="0" role="button" aria-label="Connect into ${escapeHtml(getNodeLabel(node))}"/>` : ''}
       <rect class="node-accent accent-${safeType}" x="16" y="17" width="26" height="26" rx="8"/>
       <text class="node-glyph" x="29" y="35" text-anchor="middle">${node.type === 'start' ? '↗' : node.type === 'condition' ? '?' : '✓'}</text>
       <text class="node-kind" x="54" y="27">${typeLabel}</text>
