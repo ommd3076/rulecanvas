@@ -180,27 +180,52 @@ export function validateGraph(graph) {
   }
 
   if (starts.length === 1) {
-    const visited = new Set();
+    const reachable = new Set();
+    const pendingReachable = [starts[0].id];
+    while (pendingReachable.length) {
+      const nodeId = pendingReachable.pop();
+      if (reachable.has(nodeId)) continue;
+      reachable.add(nodeId);
+      for (const edge of outgoing.get(nodeId) ?? []) {
+        if (nodeById.has(edge.to)) pendingReachable.push(edge.to);
+      }
+    }
+
+    const complete = new Set();
     const active = new Set();
-    function walk(nodeId) {
-      if (active.has(nodeId)) {
-        errors.push(fail('graph.cycle', 'Rule graph contains a cycle.', { nodeId }));
-        return;
+    const cycleNodes = new Set();
+    for (const rootId of nodeById.keys()) {
+      if (complete.has(rootId)) continue;
+      const stack = [{ nodeId: rootId, leaving: false }];
+      while (stack.length) {
+        const frame = stack.pop();
+        if (frame.leaving) {
+          active.delete(frame.nodeId);
+          complete.add(frame.nodeId);
+          continue;
+        }
+        if (active.has(frame.nodeId)) {
+          cycleNodes.add(frame.nodeId);
+          continue;
+        }
+        if (complete.has(frame.nodeId)) continue;
+        active.add(frame.nodeId);
+        stack.push({ nodeId: frame.nodeId, leaving: true });
+        const node = nodeById.get(frame.nodeId);
+        if (node?.type !== 'outcome') {
+          const edges = outgoing.get(frame.nodeId) ?? [];
+          for (let index = edges.length - 1; index >= 0; index--) {
+            const edge = edges[index];
+            if (nodeById.has(edge.to)) stack.push({ nodeId: edge.to, leaving: false });
+          }
+        }
       }
-      if (visited.has(nodeId)) return;
-      visited.add(nodeId);
-      active.add(nodeId);
-      const node = nodeById.get(nodeId);
-      if (node?.type !== 'outcome') {
-        for (const edge of outgoing.get(nodeId) ?? []) if (nodeById.has(edge.to)) walk(edge.to);
-      }
-      active.delete(nodeId);
     }
-    walk(starts[0].id);
+    for (const nodeId of cycleNodes) errors.push(fail('graph.cycle', 'Rule graph contains a cycle.', { nodeId }));
     for (const node of graph.nodes) {
-      if (node?.id && !visited.has(node.id)) errors.push(fail('graph.unreachable', 'Node cannot be reached from the start node.', { nodeId: node.id }));
+      if (node?.id && !reachable.has(node.id)) errors.push(fail('graph.unreachable', 'Node cannot be reached from the start node.', { nodeId: node.id }));
     }
-    if (visited.size && ![...visited].some((id) => nodeById.get(id)?.type === 'outcome')) {
+    if (reachable.size && ![...reachable].some((id) => nodeById.get(id)?.type === 'outcome')) {
       errors.push(fail('graph.terminal.missing', 'No path from the start reaches an outcome.'));
     }
   }

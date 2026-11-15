@@ -52,6 +52,51 @@ test('reports cycles and unreachable nodes by stable node ID', () => {
   assert.ok(result.errors.some((error) => error.code === 'graph.unreachable' && error.nodeId === 'orphan'));
 });
 
+test('reports cycles in unreachable components as well as unreachable nodes', () => {
+  const graph = validGraph();
+  graph.nodes.push(
+    { id: 'cycle-a', type: 'condition', x: 800, y: 0, fieldId: 'score', operator: 'gte', value: 0 },
+    { id: 'cycle-b', type: 'condition', x: 900, y: 0, fieldId: 'score', operator: 'gte', value: 0 },
+    { id: 'cycle-end-a', type: 'outcome', x: 1000, y: 0, label: 'A', result: 'a' },
+    { id: 'cycle-end-b', type: 'outcome', x: 1000, y: 100, label: 'B', result: 'b' },
+  );
+  graph.edges.push(
+    { id: 'cycle-edge-a', from: 'cycle-a', fromPort: 'true', to: 'cycle-b', toPort: 'in' },
+    { id: 'cycle-edge-b', from: 'cycle-a', fromPort: 'false', to: 'cycle-end-a', toPort: 'in' },
+    { id: 'cycle-edge-c', from: 'cycle-b', fromPort: 'true', to: 'cycle-a', toPort: 'in' },
+    { id: 'cycle-edge-d', from: 'cycle-b', fromPort: 'false', to: 'cycle-end-b', toPort: 'in' },
+  );
+  const result = validateGraph(graph);
+  assert.ok(result.errors.some((error) => error.code === 'graph.cycle'));
+  assert.ok(result.errors.some((error) => error.code === 'graph.unreachable' && error.nodeId === 'cycle-a'));
+});
+
+test('validates a deep graph without recursive stack overflow', () => {
+  const conditionCount = 8000;
+  const graph = {
+    schema: [{ id: 'score', name: 'score', type: 'number', required: true }],
+    nodes: [{ id: 'start', type: 'start', x: 0, y: 0 }],
+    edges: [{ id: 'start-edge', from: 'start', fromPort: 'next', to: 'condition-0', toPort: 'in' }],
+  };
+  for (let index = 0; index < conditionCount; index++) {
+    const conditionId = `condition-${index}`;
+    const falseId = `false-${index}`;
+    const trueId = index + 1 === conditionCount ? 'final-true' : `condition-${index + 1}`;
+    graph.nodes.push(
+      { id: conditionId, type: 'condition', x: index, y: 0, fieldId: 'score', operator: 'gte', value: 0 },
+      { id: falseId, type: 'outcome', x: index, y: 1, label: falseId, result: false },
+    );
+    graph.edges.push(
+      { id: `true-edge-${index}`, from: conditionId, fromPort: 'true', to: trueId, toPort: 'in' },
+      { id: `false-edge-${index}`, from: conditionId, fromPort: 'false', to: falseId, toPort: 'in' },
+    );
+    if (index + 1 === conditionCount) {
+      graph.nodes.push({ id: trueId, type: 'outcome', x: index + 1, y: 0, label: trueId, result: true });
+    }
+  }
+  assert.deepEqual(validateGraph(graph), { valid: true, errors: [] });
+});
+
 test('rejects missing required and wrongly typed evaluation inputs', () => {
   const graph = validGraph();
   const missing = evaluateGraph(graph, { tier: 'standard' });
