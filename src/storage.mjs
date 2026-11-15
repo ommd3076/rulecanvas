@@ -26,6 +26,26 @@ function assertVersionIntegrity(version) {
   }
 }
 
+function parseStoreContents(contents) {
+  let stored;
+  try { stored = JSON.parse(contents); }
+  catch { throw new StoreError('Local workspace JSON is malformed.', 503, 'storage.corrupt'); }
+  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
+    throw new StoreError('Local workspace data has an invalid shape.', 503, 'storage.corrupt');
+  }
+  for (const key of ['projects', 'rulesets', 'versions', 'auditEvents']) {
+    if (stored[key] !== undefined && !Array.isArray(stored[key])) {
+      throw new StoreError(`Local workspace ${key} data has an invalid shape.`, 503, 'storage.corrupt');
+    }
+  }
+  return {
+    projects: stored.projects ?? [],
+    rulesets: stored.rulesets ?? [],
+    versions: stored.versions ?? [],
+    auditEvents: stored.auditEvents ?? [],
+  };
+}
+
 function slugify(value) {
   return value
     .normalize('NFKD')
@@ -39,23 +59,40 @@ function slugify(value) {
 export class JsonStore {
   #file;
   #tail = Promise.resolve();
+  #recovered = false;
+  #corruptOriginal = null;
 
   constructor(file = resolve('data/rulecanvas.json')) {
     this.#file = file;
   }
 
   async #read() {
+    let contents;
     try {
-      const stored = JSON.parse(await readFile(this.#file, 'utf8'));
-      return {
-        projects: Array.isArray(stored.projects) ? stored.projects : [],
-        rulesets: Array.isArray(stored.rulesets) ? stored.rulesets : [],
-        versions: Array.isArray(stored.versions) ? stored.versions : [],
-        auditEvents: Array.isArray(stored.auditEvents) ? stored.auditEvents : [],
-      };
+      contents = await readFile(this.#file, 'utf8');
     } catch (error) {
       if (error.code === 'ENOENT') return { projects: [], rulesets: [], versions: [], auditEvents: [] };
       throw error;
+    }
+    try {
+      return parseStoreContents(contents);
+    } catch (error) {
+      if (!(error instanceof StoreError) || error.code !== 'storage.corrupt') throw error;
+      try {
+        const backup = await readFile(`${this.#file}.bak`, 'utf8');
+        const restored = parseStoreContents(backup);
+        this.#recovered = true;
+        this.#corruptOriginal = contents;
+        return restored;
+      } catch (backupError) {
+        if (backupError.code === 'ENOENT') {
+          throw new StoreError('Local workspace JSON is damaged and no recovery checkpoint exists. The files were left untouched.', 503, 'storage.corrupt');
+        }
+        if (backupError instanceof StoreError && backupError.code === 'storage.corrupt') {
+          throw new StoreError('Local workspace JSON and its recovery checkpoint are damaged. The files were left untouched.', 503, 'storage.corrupt');
+        }
+        throw backupError;
+      }
     }
   }
 
@@ -63,8 +100,30 @@ export class JsonStore {
     await mkdir(dirname(this.#file), { recursive: true });
     const temporary = `${this.#file}.${process.pid}.${randomUUID()}.tmp`;
     await writeFile(temporary, `${JSON.stringify(data, null, 2)}\n`, { flag: 'wx' });
+    if (this.#recovered && this.#corruptOriginal !== null) {
+      const preserved = `${this.#file}.corrupt-${Date.now()}-${randomUUID()}`;
+      try {
+        await writeFile(preserved, this.#corruptOriginal, { flag: 'wx' });
+      } catch {
+        throw new StoreError('Could not preserve the damaged workspace file; recovery was not written.', 503, 'storage.preserve_failed');
+      }
+    }
+    if (!this.#recovered) {
+      try {
+        const previous = await readFile(this.#file);
+        const backupTemporary = `${this.#file}.${process.pid}.${randomUUID()}.bak.tmp`;
+        await writeFile(backupTemporary, previous, { flag: 'wx' });
+        await rename(backupTemporary, `${this.#file}.bak`);
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
+    }
     await rename(temporary, this.#file);
+    this.#recovered = false;
+    this.#corruptOriginal = null;
   }
+
+  wasRecovered() { return this.#recovered; }
 
   async #transact(operation) {
     const previous = this.#tail;

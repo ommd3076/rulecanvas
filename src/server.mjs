@@ -86,7 +86,7 @@ export function createRuleCanvasServer({ store = new JsonStore() } = {}) {
     const method = request.method;
     try {
       if (url.pathname === '/api/health' && method === 'GET') {
-        sendJson(response, 200, { ok: true, storage: 'local-json' });
+        sendJson(response, 200, { ok: true, storage: 'local-json', recovered: store.wasRecovered?.() ?? false });
         return;
       }
       if (url.pathname === '/api/projects' && method === 'GET') {

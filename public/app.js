@@ -990,7 +990,13 @@ app.addEventListener('keydown', (event) => {
 });
 
 async function boot() {
-  try { await loadProjects(); render(); }
+  try {
+    await loadProjects();
+    render();
+    api('/api/health').then(({ recovered }) => {
+      if (recovered) showToast('Loaded the previous local checkpoint. The latest saved change may be missing; create or save a project to repair the workspace file.', 'error');
+    }).catch(() => {});
+  }
   catch (error) { app.innerHTML = `<main class="fatal-state"><h1>Workspace unavailable</h1><p>${escapeHtml(error.message)}</p><button class="button button-secondary" data-action="reload">Try again</button></main>`; }
 }
 

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRuleCanvasServer } from '../src/server.mjs';
@@ -165,4 +165,28 @@ test('returns client errors for malformed and non-object JSON request bodies', a
   const malformedResponse = await fetch(`${base}/api/projects`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{' });
   assert.equal(malformedResponse.status, 400);
   assert.equal((await malformedResponse.json()).error.code, 'request.json');
+});
+
+test('health reports recovery after the app loads a prior local checkpoint', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'rulecanvas-health-recovery-'));
+  const store = new JsonStore(join(directory, 'store.json'));
+  await store.createProject('First checkpoint');
+  await store.createProject('Current state');
+  await writeFile(join(directory, 'store.json'), '{damaged');
+  const server = createRuleCanvasServer({ store });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  const projects = await jsonRequest(base, '/api/projects');
+  assert.equal(projects.status, 200);
+  assert.deepEqual(projects.body.projects.map((project) => project.name), ['First checkpoint']);
+  const health = await jsonRequest(base, '/api/health');
+  assert.equal(health.body.recovered, true);
 });
