@@ -7,6 +7,7 @@ RuleCanvas is a visual workbench for building, validating, and evaluating determ
 - Create a named project and reopen it from local JSON storage.
 - Create a draft ruleset with a persistent revision number.
 - Edit an interactive SVG graph: drag condition and outcome nodes from the palette, move nodes, and connect typed flow ports by pointer or keyboard.
+- Undo and redo graph edits with grouped text entry, toolbar controls, and editor keyboard shortcuts.
 - Define typed input fields (`string`, `number`, `boolean`, `date`, and `enum`), required state, and enum options.
 - Validate branch completeness, edge compatibility, duplicate IDs, missing references, cycles, and unreachable nodes.
 - Evaluate a saved graph against typed input and return a deterministic result with an ordered node-ID trace.
@@ -43,7 +44,7 @@ Graphs use one `start` node, `condition` nodes with `true` and `false` flow outp
 ## Next gates
 
 1. Run pointer and keyboard flows in a real browser at desktop, tablet, and mobile widths; inspect saved/reopened node positions and connections.
-2. Add explicit undo/redo, delete confirmation, autosave/retry states, import/export, and stronger schema migration handling.
+2. Add delete confirmation, autosave/retry states, import/export, and stronger schema migration handling.
 3. Decide and implement authentication, durable shared persistence, audit events, immutable published versions, and authorization before any hosted multi-user release.
 4. Add API abuse limits and cross-process locking before treating the local server as a shared backend.
 

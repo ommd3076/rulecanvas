@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node src/server.mjs",
     "test": "node --test",
-    "check": "node --check src/rule-engine.mjs && node --check src/storage.mjs && node --check src/server.mjs && node --check public/app.js && node --check public/render-utils.js"
+    "check": "node --check src/rule-engine.mjs && node --check src/storage.mjs && node --check src/server.mjs && node --check public/app.js && node --check public/history.js && node --check public/render-utils.js"
   },
   "engines": {
     "node": ">=22.0.0"

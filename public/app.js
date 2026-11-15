@@ -1,4 +1,5 @@
 import { escapeHtml, renderTestTextInput } from './render-utils.js';
+import { createHistory, restoreSnapshot, saveSnapshot } from './history.js';
 
 const app = document.querySelector('#app');
 const toast = document.querySelector('#toast');
@@ -7,6 +8,7 @@ const state = {
   view: 'dashboard', selectedNodeId: null, dirty: false, connectionSource: null,
   connectionPointer: null, drag: null, zoom: 1, offset: { x: 0, y: 0 },
   testInput: {}, result: null, errors: [], saveState: 'saved',
+  history: createHistory(),
 };
 let toastTimer;
 
@@ -71,6 +73,38 @@ function markDirty() {
   renderEditorHeaderState();
 }
 
+function checkpointHistory(group = null) {
+  saveSnapshot(state.history, state.graph, group);
+  renderHistoryButtons();
+}
+
+function checkpointSnapshot(snapshot) {
+  if (!snapshot) return;
+  saveSnapshot(state.history, snapshot);
+  renderHistoryButtons();
+}
+
+function renderHistoryButtons() {
+  const undo = document.querySelector('#undo-button');
+  const redo = document.querySelector('#redo-button');
+  if (undo) undo.disabled = state.history.undo.length === 0;
+  if (redo) redo.disabled = state.history.redo.length === 0;
+}
+
+function resetHistory() {
+  state.history = createHistory();
+}
+
+function applyHistory(direction) {
+  const graph = restoreSnapshot(state.history, state.graph, direction);
+  if (!graph) return;
+  state.graph = graph;
+  state.result = null;
+  state.errors = [];
+  markDirty();
+  render();
+}
+
 function renderEditorHeaderState() {
   const status = document.querySelector('#save-status');
   const button = document.querySelector('#save-button');
@@ -79,6 +113,7 @@ function renderEditorHeaderState() {
     status.dataset.state = state.dirty ? state.saveState : 'saved';
   }
   if (button) button.disabled = !state.dirty || state.saveState === 'saving';
+  renderHistoryButtons();
 }
 
 async function loadProjects() {
@@ -110,6 +145,7 @@ async function openRuleset(rulesetId) {
   state.result = null;
   state.errors = [];
   state.testInput = {};
+  resetHistory();
   state.zoom = 1;
   state.offset = { x: 0, y: 0 };
   render();
@@ -284,7 +320,7 @@ function renderValidation() {
 
 function renderEditor() {
   app.innerHTML = shell(`<section class="editor-page">
-    <div class="editor-toolbar"><div class="editor-title"><button class="back-icon" data-action="back-project" aria-label="Back to project">←</button><div><div class="editor-project-label">${escapeHtml(state.project.name)} <span>›</span></div><input id="ruleset-name" aria-label="Rule set name" value="${escapeHtml(state.ruleset.name)}" maxlength="80"/></div></div><div class="editor-actions"><span id="save-status" class="save-status" data-state="${state.dirty ? 'unsaved' : 'saved'}">${state.dirty ? 'Unsaved changes' : `Saved · v${state.revision}`}</span><button id="validate-button" class="button button-outline" data-action="validate">Validate</button><button id="save-button" class="button button-primary" data-action="save" ${state.dirty ? '' : 'disabled'}>Save draft</button></div></div>
+    <div class="editor-toolbar"><div class="editor-title"><button class="back-icon" data-action="back-project" aria-label="Back to project">←</button><div><div class="editor-project-label">${escapeHtml(state.project.name)} <span>›</span></div><input id="ruleset-name" aria-label="Rule set name" value="${escapeHtml(state.ruleset.name)}" maxlength="80"/></div></div><div class="editor-actions"><button id="undo-button" class="history-button" data-action="undo" aria-label="Undo" title="Undo (Ctrl+Z)" disabled>↶</button><button id="redo-button" class="history-button" data-action="redo" aria-label="Redo" title="Redo (Ctrl+Y)" disabled>↷</button><span id="save-status" class="save-status" data-state="${state.dirty ? 'unsaved' : 'saved'}">${state.dirty ? 'Unsaved changes' : `Saved · v${state.revision}`}</span><button id="validate-button" class="button button-outline" data-action="validate">Validate</button><button id="save-button" class="button button-primary" data-action="save" ${state.dirty ? '' : 'disabled'}>Save draft</button></div></div>
     <div class="editor-workspace">
       <aside class="editor-left"><div class="panel-heading"><div><h3>Build</h3><p>Drag concepts onto the canvas</p></div></div><div class="palette-group"><span class="palette-label">FLOW</span><button class="palette-card" draggable="true" data-add-node="condition"><span class="palette-symbol palette-condition">?</span><span><strong>Condition</strong><small>Compare an input value</small></span><span class="palette-plus">+</span></button><button class="palette-card" draggable="true" data-add-node="outcome"><span class="palette-symbol palette-outcome">✓</span><span><strong>Outcome</strong><small>Return a decision</small></span><span class="palette-plus">+</span></button></div>${renderSchema()}<div class="left-help"><span>⌘</span><span>Drag a node onto the canvas. Connect output ports to inputs; keyboard users can select an output then an input.</span></div></aside>
       <section class="canvas-area"><div class="canvas-topline"><div><strong>Decision canvas</strong><span>${state.graph.nodes.length} nodes · ${state.graph.edges.length} connections</span></div><div class="canvas-tools"><button class="canvas-tool" data-action="zoom-out" aria-label="Zoom out">−</button><span class="zoom-label">${Math.round(state.zoom * 100)}%</span><button class="canvas-tool" data-action="zoom-in" aria-label="Zoom in">+</button><button class="canvas-tool fit-tool" data-action="fit" title="Fit graph">Fit</button></div></div><div class="canvas-viewport" id="canvas-viewport">${renderCanvasMarkup()}<div class="canvas-hint"><span class="hint-key">Esc</span> Cancel connection <span class="hint-divider">·</span> Drag canvas with space</div></div>${renderValidation()}</section>
@@ -292,6 +328,7 @@ function renderEditor() {
     </div>
   </section>`);
   attachCanvasEvents();
+  renderHistoryButtons();
 }
 
 function parseTypedValue(input, type) {
@@ -301,6 +338,7 @@ function parseTypedValue(input, type) {
 }
 
 function newNode(type, point = null) {
+  checkpointHistory();
   const conditionCount = state.graph.nodes.filter((node) => node.type === 'condition').length;
   const outcomeCount = state.graph.nodes.filter((node) => node.type === 'outcome').length;
   const centerX = point?.x ?? (type === 'condition' ? 360 + conditionCount * 285 : 710);
@@ -326,6 +364,7 @@ function newNode(type, point = null) {
 
 function addField() {
   const index = state.graph.schema.length + 1;
+  checkpointHistory();
   state.graph.schema.push({ id: id('field'), name: `Input ${index}`, type: 'string', required: true });
   markDirty(); render();
 }
@@ -333,6 +372,8 @@ function addField() {
 function updateField(fieldId, updates) {
   const field = state.graph.schema.find((item) => item.id === fieldId);
   if (!field) return;
+  if (Object.entries(updates).every(([key, value]) => field[key] === value)) return;
+  checkpointHistory();
   Object.assign(field, updates);
   for (const node of state.graph.nodes) {
     if (node.type !== 'condition' || node.fieldId !== field.id) continue;
@@ -365,6 +406,7 @@ function completeConnection(target) {
     showToast('That connection is incompatible or a branch is already connected.', 'error');
     return false;
   }
+  checkpointHistory();
   state.graph.edges.push({
     id: id('edge'), from: state.connectionSource.nodeId, fromPort: state.connectionSource.port,
     to: target.nodeId, toPort: target.port,
@@ -414,7 +456,7 @@ function attachCanvasEvents() {
       const node = state.graph.nodes.find((item) => item.id === nodeId);
       if (event.button === 0 && !event.target.closest('[data-port-kind]')) {
         const point = svgPoint(event);
-        state.drag = { nodeId, dx: point.x - node.x, dy: point.y - node.y };
+        state.drag = { nodeId, dx: point.x - node.x, dy: point.y - node.y, before: structuredClone(state.graph), moved: false };
         svg.setPointerCapture(event.pointerId);
       }
       renderInspectorPanel();
@@ -450,8 +492,9 @@ function attachCanvasEvents() {
   svg.addEventListener('pointerup', (event) => {
     if (state.drag) {
       const moved = state.drag.moved;
+      const before = state.drag.before;
       state.drag = null;
-      if (moved) { markDirty(); render(); }
+      if (moved) { checkpointSnapshot(before); markDirty(); render(); }
       return;
     }
     if (state.connectionSource) {
@@ -461,7 +504,10 @@ function attachCanvasEvents() {
     }
     panOrigin = null;
   });
-  svg.addEventListener('pointercancel', () => { state.drag = null; state.connectionPointer = null; panOrigin = null; renderCanvas(); });
+  svg.addEventListener('pointercancel', () => {
+    if (state.drag?.moved) state.graph = state.drag.before;
+    state.drag = null; state.connectionPointer = null; panOrigin = null; renderCanvas();
+  });
   svg.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' || event.key === ' ') {
       const port = event.target.closest('[data-port-kind]');
@@ -560,6 +606,7 @@ function deleteSelectedNode() {
   if (!nodeId || state.graph.nodes.find((item) => item.id === nodeId)?.type === 'start') {
     showToast('The start node is required.', 'error'); return;
   }
+  checkpointHistory();
   state.graph.nodes = state.graph.nodes.filter((node) => node.id !== nodeId);
   state.graph.edges = state.graph.edges.filter((edge) => edge.from !== nodeId && edge.to !== nodeId);
   state.selectedNodeId = null;
@@ -578,6 +625,7 @@ app.addEventListener('click', async (event) => {
   if (addNodeButton) { newNode(addNodeButton.dataset.addNode); return; }
   if (removeFieldButton) {
     if (!window.confirm('Remove this input field? Conditions using it will need an update.')) return;
+    checkpointHistory();
     state.graph.schema = state.graph.schema.filter((field) => field.id !== removeFieldButton.dataset.removeField);
     markDirty(); render(); return;
   }
@@ -599,6 +647,8 @@ app.addEventListener('click', async (event) => {
       await openRuleset(data.ruleset.id);
     } else if (action === 'back-project') await openProject(state.project.id);
     else if (action === 'save') await saveDraft();
+    else if (action === 'undo') applyHistory('undo');
+    else if (action === 'redo') applyHistory('redo');
     else if (action === 'validate') await validateDraft();
     else if (action === 'evaluate') await evaluateDraft();
     else if (action === 'clear-test') { state.result = null; state.testInput = {}; render(); }
@@ -637,7 +687,11 @@ app.addEventListener('drop', (event) => {
 app.addEventListener('input', (event) => {
   if (event.target.dataset.fieldProp === 'name') {
     const field = state.graph?.schema.find((item) => item.id === event.target.dataset.fieldId);
-    if (field) { field.name = event.target.value; markDirty(); }
+    if (field && field.name !== event.target.value) {
+      checkpointHistory(`field-name:${field.id}`);
+      field.name = event.target.value;
+      markDirty();
+    }
     return;
   }
   if (event.target.id === 'project-search') {
@@ -654,15 +708,26 @@ app.addEventListener('input', (event) => {
   }
   if (event.target.id === 'outcome-label') {
     const node = state.graph.nodes.find((item) => item.id === state.selectedNodeId);
-    if (node) { node.label = event.target.value; markDirty(); renderCanvas(); }
+    if (node && node.label !== event.target.value) {
+      checkpointHistory(`outcome-label:${node.id}`);
+      node.label = event.target.value;
+      markDirty(); renderCanvas();
+    }
     return;
   }
   if (event.target.id === 'outcome-result') {
     const node = state.graph.nodes.find((item) => item.id === state.selectedNodeId);
     if (!node) return;
-    try { node.result = JSON.parse(event.target.value); event.target.setCustomValidity(''); }
+    try {
+      const nextResult = JSON.parse(event.target.value);
+      if (JSON.stringify(node.result) !== JSON.stringify(nextResult)) {
+        checkpointHistory(`outcome-result:${node.id}`);
+        node.result = nextResult;
+        markDirty(); renderCanvas();
+      }
+      event.target.setCustomValidity('');
+    }
     catch { event.target.setCustomValidity('Use valid JSON to return a structured value.'); }
-    markDirty(); renderCanvas();
     return;
   }
 });
@@ -671,7 +736,7 @@ app.addEventListener('change', (event) => {
   const field = event.target.dataset.fieldId && state.graph.schema.find((item) => item.id === event.target.dataset.fieldId);
   if (field) {
     const prop = event.target.dataset.fieldProp;
-    if (prop === 'name') updateField(field.id, { name: event.target.value });
+    if (prop === 'name') { field.name = event.target.value.trim(); markDirty(); render(); }
     if (prop === 'type') {
       const type = event.target.value;
       updateField(field.id, { type, options: type === 'enum' ? ['Option A', 'Option B'] : undefined });
@@ -684,6 +749,7 @@ app.addEventListener('change', (event) => {
     const node = state.graph.nodes.find((item) => item.id === state.selectedNodeId);
     const targetField = state.graph.schema.find((item) => item.id === event.target.value);
     if (node && targetField) {
+      checkpointHistory();
       node.fieldId = targetField.id;
       node.operator = 'eq';
       node.value = targetField.type === 'number' ? 0 : targetField.type === 'boolean' ? true : targetField.type === 'enum' ? targetField.options?.[0] ?? '' : targetField.type === 'date' ? '2026-01-01' : '';
@@ -692,12 +758,16 @@ app.addEventListener('change', (event) => {
   }
   if (event.target.id === 'condition-operator') {
     const node = state.graph.nodes.find((item) => item.id === state.selectedNodeId);
-    if (node) { node.operator = event.target.value; markDirty(); render(); }
+    if (node && node.operator !== event.target.value) { checkpointHistory(); node.operator = event.target.value; markDirty(); render(); }
   }
   if (event.target.id === 'condition-value') {
     const node = state.graph.nodes.find((item) => item.id === state.selectedNodeId);
     const field = state.graph.schema.find((item) => item.id === node?.fieldId);
-    if (node && field) { node.value = parseTypedValue(event.target, field.type); markDirty(); render(); }
+    const value = field ? parseTypedValue(event.target, field.type) : undefined;
+    if (node && field && node.value !== value) {
+      checkpointHistory(`condition-value:${node.id}`);
+      node.value = value; markDirty(); render();
+    }
   }
 });
 
@@ -719,6 +789,17 @@ app.addEventListener('click', (event) => {
 });
 
 app.addEventListener('keydown', (event) => {
+  const editingText = event.target.matches('input, textarea, select, [contenteditable="true"]');
+  if (!editingText && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+    event.preventDefault();
+    applyHistory(event.shiftKey ? 'redo' : 'undo');
+    return;
+  }
+  if (!editingText && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') {
+    event.preventDefault();
+    applyHistory('redo');
+    return;
+  }
   if (event.key === 'Escape' && state.connectionSource) {
     state.connectionSource = null; state.connectionPointer = null; renderCanvas();
   }
