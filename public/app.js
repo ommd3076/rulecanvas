@@ -1,11 +1,12 @@
 import { escapeHtml, renderTestTextInput } from './render-utils.js';
 import { createHistory, restoreSnapshot, saveSnapshot } from './history.js';
+import { removeConnection } from './graph-editing.js';
 
 const app = document.querySelector('#app');
 const toast = document.querySelector('#toast');
 const state = {
   projects: [], project: null, ruleset: null, graph: null, revision: 0,
-  view: 'dashboard', selectedNodeId: null, dirty: false, connectionSource: null,
+  view: 'dashboard', selectedNodeId: null, selectedEdgeId: null, dirty: false, connectionSource: null,
   connectionPointer: null, drag: null, zoom: 1, offset: { x: 0, y: 0 },
   testInput: {}, result: null, errors: [], saveState: 'saved',
   history: createHistory(),
@@ -228,7 +229,7 @@ function renderCanvasMarkup() {
     const portOffset = edge.fromPort === 'true' ? 65 : edge.fromPort === 'false' ? 112 : 83;
     const labelY = source ? safeSvgNumber(Number(source.y) + portOffset) : '0';
     const label = edge.fromPort === 'true' ? 'Yes' : edge.fromPort === 'false' ? 'No' : '';
-    return `<g class="edge-group"><path class="edge-path" d="${escapeHtml(edgePath(edge))}" marker-end="url(#arrow)"/><text class="edge-label" x="${escapeHtml(labelX)}" y="${escapeHtml(labelY)}">${label}</text></g>`;
+    return `<g class="edge-group${state.selectedEdgeId === edge.id ? ' is-selected' : ''}" data-edge="${escapeHtml(edge.id)}" tabindex="0" role="button" aria-label="Connection from ${escapeHtml(source ? getNodeLabel(source) : 'missing node')}; select to remove"><path class="edge-path" d="${escapeHtml(edgePath(edge))}" marker-end="url(#arrow)"/><text class="edge-label" x="${escapeHtml(labelX)}" y="${escapeHtml(labelY)}">${label}</text></g>`;
   }).join('');
   const nodeSvg = state.graph.nodes.map((node) => {
     const selected = state.selectedNodeId === node.id;
@@ -325,7 +326,7 @@ function renderEditor() {
     <div class="editor-toolbar"><div class="editor-title"><button class="back-icon" data-action="back-project" aria-label="Back to project">←</button><div><div class="editor-project-label">${escapeHtml(state.project.name)} <span>›</span></div><input id="ruleset-name" aria-label="Rule set name" value="${escapeHtml(state.ruleset.name)}" maxlength="80"/></div></div><div class="editor-actions"><button id="undo-button" class="history-button" data-action="undo" aria-label="Undo" title="Undo (Ctrl+Z)" disabled>↶</button><button id="redo-button" class="history-button" data-action="redo" aria-label="Redo" title="Redo (Ctrl+Y)" disabled>↷</button><span id="save-status" class="save-status" data-state="${state.dirty ? 'unsaved' : 'saved'}">${state.dirty ? 'Unsaved changes' : `Saved · v${state.revision}`}</span><button id="validate-button" class="button button-outline" data-action="validate">Validate</button><button class="button button-outline" data-action="versions">Versions</button><button id="version-button" class="button button-primary" data-action="create-version" ${state.dirty ? 'disabled' : ''}>Save version</button><button id="save-button" class="button button-primary" data-action="save" ${state.dirty ? '' : 'disabled'}>Save draft</button></div></div>
     <div class="editor-workspace">
       <aside class="editor-left"><div class="panel-heading"><div><h3>Build</h3><p>Drag concepts onto the canvas</p></div></div><div class="palette-group"><span class="palette-label">FLOW</span><button class="palette-card" draggable="true" data-add-node="condition"><span class="palette-symbol palette-condition">?</span><span><strong>Condition</strong><small>Compare an input value</small></span><span class="palette-plus">+</span></button><button class="palette-card" draggable="true" data-add-node="outcome"><span class="palette-symbol palette-outcome">✓</span><span><strong>Outcome</strong><small>Return a decision</small></span><span class="palette-plus">+</span></button></div>${renderSchema()}<div class="left-help"><span>⌘</span><span>Drag a node onto the canvas. Connect output ports to inputs; keyboard users can select an output then an input.</span></div></aside>
-      <section class="canvas-area"><div class="canvas-topline"><div><strong>Decision canvas</strong><span>${state.graph.nodes.length} nodes · ${state.graph.edges.length} connections</span></div><div class="canvas-tools"><button class="canvas-tool" data-action="zoom-out" aria-label="Zoom out">−</button><span class="zoom-label">${Math.round(state.zoom * 100)}%</span><button class="canvas-tool" data-action="zoom-in" aria-label="Zoom in">+</button><button class="canvas-tool fit-tool" data-action="fit" title="Fit graph">Fit</button></div></div><div class="canvas-viewport" id="canvas-viewport">${renderCanvasMarkup()}<div class="canvas-hint"><span class="hint-key">Esc</span> Cancel connection <span class="hint-divider">·</span> Drag canvas with space</div></div>${renderValidation()}</section>
+      <section class="canvas-area"><div class="canvas-topline"><div><strong>Decision canvas</strong><span>${state.graph.nodes.length} nodes · ${state.graph.edges.length} connections</span></div><div class="canvas-tools"><button class="canvas-tool" data-action="zoom-out" aria-label="Zoom out">−</button><span class="zoom-label">${Math.round(state.zoom * 100)}%</span><button class="canvas-tool" data-action="zoom-in" aria-label="Zoom in">+</button><button class="canvas-tool fit-tool" data-action="fit" title="Fit graph">Fit</button><button id="delete-edge-button" class="canvas-tool" data-action="delete-edge" title="Select a connection to remove" aria-label="Delete selected connection" ${state.selectedEdgeId ? '' : 'disabled'}>Remove link</button></div></div><div class="canvas-viewport" id="canvas-viewport">${renderCanvasMarkup()}<div class="canvas-hint"><span class="hint-key">Esc</span> Cancel connection <span class="hint-divider">·</span> Drag canvas with space</div></div>${renderValidation()}</section>
       <aside class="editor-right"><div id="inspector-panel" class="inspector-panel"><div class="panel-heading"><div><h3>Properties</h3><p>Edit the selected node</p></div></div>${renderInspector()}</div>${renderTestPanel()}</aside>
     </div>
   </section>`);
@@ -611,7 +612,17 @@ function deleteSelectedNode() {
   checkpointHistory();
   state.graph.nodes = state.graph.nodes.filter((node) => node.id !== nodeId);
   state.graph.edges = state.graph.edges.filter((edge) => edge.from !== nodeId && edge.to !== nodeId);
+  state.selectedEdgeId = null;
   state.selectedNodeId = null;
+  markDirty(); render();
+}
+
+function deleteSelectedEdge() {
+  if (!state.selectedEdgeId) return;
+  const previous = structuredClone(state.graph);
+  if (!removeConnection(state.graph, state.selectedEdgeId)) return;
+  state.selectedEdgeId = null;
+  checkpointSnapshot(previous);
   markDirty(); render();
 }
 
@@ -663,6 +674,7 @@ app.addEventListener('click', async (event) => {
     else if (action === 'evaluate') await evaluateDraft();
     else if (action === 'clear-test') { state.result = null; state.testInput = {}; render(); }
     else if (action === 'delete-node') deleteSelectedNode();
+    else if (action === 'delete-edge') deleteSelectedEdge();
     else if (action === 'zoom-in') { state.zoom = Math.min(1.6, state.zoom * 1.12); renderCanvas(); updateZoomLabel(); }
     else if (action === 'zoom-out') { state.zoom = Math.max(0.45, state.zoom / 1.12); renderCanvas(); updateZoomLabel(); }
     else if (action === 'fit') { state.zoom = 0.8; state.offset = { x: 0, y: 0 }; renderCanvas(); updateZoomLabel(); }
@@ -791,9 +803,21 @@ app.addEventListener('change', (event) => {
 });
 
 app.addEventListener('click', (event) => {
+  const edge = event.target.closest('[data-edge]');
+  if (edge) {
+    state.selectedEdgeId = edge.dataset.edge;
+    state.selectedNodeId = null;
+    renderCanvas(); renderInspectorPanel();
+    const deleteButton = document.querySelector('#delete-edge-button');
+    if (deleteButton) deleteButton.disabled = false;
+    return;
+  }
   const node = event.target.closest('[data-node]');
   if (node && !event.target.closest('[data-port-kind]')) {
     state.selectedNodeId = node.dataset.node;
+    state.selectedEdgeId = null;
+    const deleteButton = document.querySelector('#delete-edge-button');
+    if (deleteButton) deleteButton.disabled = true;
     if (state.view === 'editor') renderInspectorPanel();
   }
 });
@@ -815,7 +839,7 @@ app.addEventListener('keydown', (event) => {
   }
   if ((event.key === 'Delete' || event.key === 'Backspace') && state.view === 'editor') {
     const tag = document.activeElement?.tagName;
-    if (!['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) { event.preventDefault(); deleteSelectedNode(); }
+    if (!['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) { event.preventDefault(); if (state.selectedEdgeId) deleteSelectedEdge(); else deleteSelectedNode(); }
   }
 });
 

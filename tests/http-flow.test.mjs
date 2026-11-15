@@ -141,10 +141,13 @@ test('serves app assets from the public directory and blocks traversal', async (
   assert.match(index.headers.get('content-security-policy'), /style-src 'self'/);
   const appScript = await fetch(`${base}/app.js`);
   const historyModule = await fetch(`${base}/history.js`);
+  const graphEditingModule = await fetch(`${base}/graph-editing.js`);
   assert.equal(appScript.status, 200);
   assert.match(appScript.headers.get('content-type'), /javascript/);
   assert.equal(historyModule.status, 200);
   assert.match(historyModule.headers.get('content-type'), /javascript/);
+  assert.equal(graphEditingModule.status, 200);
+  assert.match(graphEditingModule.headers.get('content-type'), /javascript/);
   const traversal = await fetch(`${base}/%2e%2e/src/server.mjs`);
   assert.equal(traversal.status, 404);
 });

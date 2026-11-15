@@ -201,6 +201,8 @@ h1 { margin: 0; font-size: clamp(26px, 3vw, 36px); line-height: 1.1; letter-spac
 .port-no { fill: #edb28c; }
 .port:hover, .port:focus { r: 9; stroke: #fff; }
 .edge-path { fill: none; stroke: #9aafa3; stroke-width: 2.2; }
+.edge-group { cursor: pointer; }
+.edge-group:focus .edge-path, .edge-group.is-selected .edge-path { stroke: #568c73; stroke-width: 4; }
 .edge-draft { stroke: #48b978; stroke-dasharray: 5 5; }
 .edge-label { fill: #82938a; font-size: 8px; font-weight: 650; }
 .branch-label { fill: #82938a; font-size: 8px; }

@@ -7,6 +7,7 @@ RuleCanvas is a visual workbench for building, validating, and evaluating determ
 - Create a named project and reopen it from local JSON storage.
 - Create a draft ruleset with a persistent revision number.
 - Edit an interactive SVG graph: drag condition and outcome nodes from the palette, move nodes, and connect typed flow ports by pointer or keyboard.
+- Select and remove an incorrect connection directly, with undo support; endpoint nodes and other branches remain in place.
 - Undo and redo graph edits with grouped text entry, toolbar controls, and editor keyboard shortcuts.
 - Define typed input fields (`string`, `number`, `boolean`, `date`, and `enum`), required state, and enum options.
 - Validate branch completeness, edge compatibility, duplicate IDs, missing references, cycles, and unreachable nodes.
