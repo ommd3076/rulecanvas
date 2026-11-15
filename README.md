@@ -55,7 +55,7 @@ Real browser flows have been verified directly in modern browser sessions:
 - Responsive layouts maintain zero root horizontal overflow (`document.documentElement.scrollWidth === clientWidth`) across 390px mobile, 450px zoomed, 768px tablet, and desktop viewports, preserving local canvas pan. This verification confirms local layout stability and usability; it does not claim full accessibility or device-matrix certification.
 
 Autosave and conflict management are fully implemented:
-- Debounced autosave (1.8s) with failure backoff retry (5s) and draft preservation on network error.
+- Debounced autosave (1.8s) with fixed 5-second failure retry and draft preservation on network error.
 - Edit-generation tracking and serialized in-flight write guards prevent network races from overwriting unsaved user edits or losing input focus.
 - 409 revision conflicts retain local in-memory drafts with one-click JSON download.
 
