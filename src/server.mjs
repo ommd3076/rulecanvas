@@ -40,7 +40,12 @@ function readBody(request) {
     request.on('end', () => {
       try {
         const text = Buffer.concat(chunks).toString('utf8');
-        resolveBody(text ? JSON.parse(text) : {});
+        const body = text ? JSON.parse(text) : {};
+        if (!body || typeof body !== 'object' || Array.isArray(body)) {
+          reject(new StoreError('Request body must be a JSON object.', 400, 'request.shape'));
+          return;
+        }
+        resolveBody(body);
       } catch {
         reject(new StoreError('Request body must be valid JSON.', 400, 'request.json'));
       }

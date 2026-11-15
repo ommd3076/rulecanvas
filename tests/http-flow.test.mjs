@@ -151,3 +151,18 @@ test('serves app assets from the public directory and blocks traversal', async (
   const traversal = await fetch(`${base}/%2e%2e/src/server.mjs`);
   assert.equal(traversal.status, 404);
 });
+
+test('returns client errors for malformed and non-object JSON request bodies', async (t) => {
+  const base = await startServer(t);
+  const nullBody = await jsonRequest(base, '/api/projects', { method: 'POST', body: 'null' });
+  assert.equal(nullBody.status, 400);
+  assert.equal(nullBody.body.error.code, 'request.shape');
+
+  const arrayResponse = await fetch(`${base}/api/projects`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '[]' });
+  assert.equal(arrayResponse.status, 400);
+  assert.equal((await arrayResponse.json()).error.code, 'request.shape');
+
+  const malformedResponse = await fetch(`${base}/api/projects`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{' });
+  assert.equal(malformedResponse.status, 400);
+  assert.equal((await malformedResponse.json()).error.code, 'request.json');
+});
