@@ -3,6 +3,7 @@ import { createHistory, restoreSnapshot, saveSnapshot } from './history.js';
 import { removeConnection } from './graph-editing.js';
 import { serializeConflictCopy } from './conflict-copy.js';
 import { parseRuleDraft, serializeRuleDraft } from './rule-transfer.js';
+import { shouldIncludeTypedValue } from './typed-input.js';
 
 const app = document.querySelector('#app');
 const toast = document.querySelector('#toast');
@@ -131,7 +132,8 @@ async function replayVersion(versionId) {
   run.addEventListener('click', async () => {
     const input = {};
     for (const [name, { control, type }] of controls) {
-      if (control.value !== '') input[name] = parseTypedValue(control, type);
+      const field = version.graph.schema.find((item) => item.name === name);
+      if (field && shouldIncludeTypedValue(field, control.value)) input[name] = parseTypedValue(control, type);
     }
     try {
       const result = await api(`/api/rulesets/${encodeURIComponent(state.ruleset.id)}/versions/${encodeURIComponent(version.id)}/evaluate`, { method: 'POST', body: JSON.stringify({ input }) });
@@ -739,8 +741,8 @@ async function evaluateDraft() {
   if (state.dirty) { showToast('Save the draft before running a decision test.', 'error'); return; }
   const input = {};
   document.querySelectorAll('[data-test-field]').forEach((control) => {
-    if (control.value === '') return;
     const field = state.graph.schema.find((item) => item.name === control.dataset.testField);
+    if (!field || !shouldIncludeTypedValue(field, control.value)) return;
     input[control.dataset.testField] = parseTypedValue(control, field.type);
   });
   try {
@@ -754,6 +756,7 @@ function deleteSelectedNode() {
   if (!nodeId || state.graph.nodes.find((item) => item.id === nodeId)?.type === 'start') {
     showToast('The start node is required.', 'error'); return;
   }
+  if (!window.confirm('Delete this node and its connected links? You can undo this change.')) return;
   checkpointHistory();
   state.graph.nodes = state.graph.nodes.filter((node) => node.id !== nodeId);
   state.graph.edges = state.graph.edges.filter((edge) => edge.from !== nodeId && edge.to !== nodeId);
