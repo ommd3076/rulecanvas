@@ -156,6 +156,7 @@ test('serves app assets from the public directory and blocks traversal', async (
   const historyModule = await fetch(`${base}/history.js`);
   const graphEditingModule = await fetch(`${base}/graph-editing.js`);
   const conflictCopyModule = await fetch(`${base}/conflict-copy.js`);
+  const transferModule = await fetch(`${base}/rule-transfer.js`);
   assert.equal(appScript.status, 200);
   assert.match(appScript.headers.get('content-type'), /javascript/);
   assert.equal(historyModule.status, 200);
@@ -164,6 +165,8 @@ test('serves app assets from the public directory and blocks traversal', async (
   assert.match(graphEditingModule.headers.get('content-type'), /javascript/);
   assert.equal(conflictCopyModule.status, 200);
   assert.match(conflictCopyModule.headers.get('content-type'), /javascript/);
+  assert.equal(transferModule.status, 200);
+  assert.match(transferModule.headers.get('content-type'), /javascript/);
   const traversal = await fetch(`${base}/%2e%2e/src/server.mjs`);
   assert.equal(traversal.status, 404);
 });

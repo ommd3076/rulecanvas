@@ -133,6 +133,7 @@ h1 { margin: 0; font-size: clamp(26px, 3vw, 36px); line-height: 1.1; letter-spac
 .editor-project-label span { margin: 0 5px; color: #bbc6c0; }
 .editor-title input { width: 260px; max-width: 45vw; padding: 0; border: 0; outline: 0; color: #27332e; font-size: 14px; font-weight: 680; background: transparent; }
 .editor-actions { display: flex; align-items: center; gap: 9px; }
+.file-input-hidden { display: none; }
 .history-button { width: 31px; height: 31px; border: 1px solid #e4ebe7; border-radius: 9px; background: #fff; color: #66766d; font-size: 19px; line-height: 1; cursor: pointer; }
 .history-button:hover:not(:disabled) { border-color: #cfe4d5; color: #3f8c5a; }
 .history-button:disabled { opacity: .4; cursor: not-allowed; }

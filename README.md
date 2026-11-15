@@ -14,6 +14,7 @@ RuleCanvas is a visual workbench for building, validating, and evaluating determ
 - Evaluate a saved graph against typed input and return a deterministic result with an ordered node-ID trace.
 - Reject stale concurrent draft writes with a revision conflict instead of silently overwriting.
 - Keep a conflicting unsaved draft in the editor, warn before leaving the page, and offer a local JSON download before reloading the server copy.
+- Export the current draft to versioned JSON and import either a draft export or conflict copy after server-side graph validation.
 - Save valid drafts as immutable, locally stored graph versions with SHA-256 consistency hashes; replay a chosen version independently from later draft edits. Hashes can detect accidental or one-sided changes, but are not authentication or tamper-proof protection against someone who can edit the local data file.
 - Record local project and ruleset creation, draft-save, and version-save events for inspection through the API.
 - Inspect saved versions and project activity in the app, and replay a saved version with its own typed input form.
@@ -50,7 +51,7 @@ Graphs use one `start` node, `condition` nodes with `true` and `false` flow outp
 ## Next gates
 
 1. Run pointer and keyboard flows in a real browser at desktop, tablet, and mobile widths; inspect saved/reopened node positions and connections.
-2. Add delete confirmation, autosave/retry states, import/export, and stronger schema migration handling.
+2. Add delete confirmation and autosave/retry states.
 3. Decide and implement authenticated actors, durable shared persistence, approval rules, and authorization before any hosted multi-user release.
 4. Add API abuse limits and cross-process locking before treating the local server as a shared backend.
 

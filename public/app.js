@@ -2,6 +2,7 @@ import { escapeHtml, renderTestTextInput } from './render-utils.js';
 import { createHistory, restoreSnapshot, saveSnapshot } from './history.js';
 import { removeConnection } from './graph-editing.js';
 import { serializeConflictCopy } from './conflict-copy.js';
+import { parseRuleDraft, serializeRuleDraft } from './rule-transfer.js';
 
 const app = document.querySelector('#app');
 const toast = document.querySelector('#toast');
@@ -460,7 +461,7 @@ function renderValidation() {
 
 function renderEditor() {
   app.innerHTML = shell(`<section class="editor-page">
-    <div class="editor-toolbar"><div class="editor-title"><button class="back-icon" data-action="back-project" aria-label="Back to project">←</button><div><div class="editor-project-label">${escapeHtml(state.project.name)} <span>›</span></div><input id="ruleset-name" aria-label="Rule set name" value="${escapeHtml(state.ruleset.name)}" maxlength="80"/></div></div><div class="editor-actions"><button id="undo-button" class="history-button" data-action="undo" aria-label="Undo" title="Undo (Ctrl+Z)" disabled>↶</button><button id="redo-button" class="history-button" data-action="redo" aria-label="Redo" title="Redo (Ctrl+Y)" disabled>↷</button><span id="save-status" class="save-status" data-state="${state.dirty ? 'unsaved' : 'saved'}">${state.dirty ? 'Unsaved changes' : `Saved · v${state.revision}`}</span><button id="validate-button" class="button button-outline" data-action="validate">Validate</button><button class="button button-outline" data-action="versions">Versions</button><button id="version-button" class="button button-primary" data-action="create-version" ${state.dirty ? 'disabled' : ''}>Save version</button><button id="save-button" class="button button-primary" data-action="save" ${state.dirty ? '' : 'disabled'}>Save draft</button></div></div>
+    <div class="editor-toolbar"><div class="editor-title"><button class="back-icon" data-action="back-project" aria-label="Back to project">←</button><div><div class="editor-project-label">${escapeHtml(state.project.name)} <span>›</span></div><input id="ruleset-name" aria-label="Rule set name" value="${escapeHtml(state.ruleset.name)}" maxlength="80"/></div></div><div class="editor-actions"><button id="undo-button" class="history-button" data-action="undo" aria-label="Undo" title="Undo (Ctrl+Z)" disabled>↶</button><button id="redo-button" class="history-button" data-action="redo" aria-label="Redo" title="Redo (Ctrl+Y)" disabled>↷</button><span id="save-status" class="save-status" data-state="${state.dirty ? 'unsaved' : 'saved'}">${state.dirty ? 'Unsaved changes' : `Saved · v${state.revision}`}</span><button id="validate-button" class="button button-outline" data-action="validate">Validate</button><button class="button button-outline" data-action="versions">Versions</button><button class="button button-outline" data-action="import-draft">Import JSON</button><button class="button button-outline" data-action="export-draft">Export JSON</button><button id="version-button" class="button button-primary" data-action="create-version" ${state.dirty ? 'disabled' : ''}>Save version</button><button id="save-button" class="button button-primary" data-action="save" ${state.dirty ? '' : 'disabled'}>Save draft</button><input id="import-draft-file" class="file-input-hidden" type="file" accept="application/json,.json" aria-label="Choose a RuleCanvas draft JSON file"/></div></div>
     <div class="editor-workspace">
       <aside class="editor-left"><div class="panel-heading"><div><h3>Build</h3><p>Drag concepts onto the canvas</p></div></div><div class="palette-group"><span class="palette-label">FLOW</span><button class="palette-card" draggable="true" data-add-node="condition"><span class="palette-symbol palette-condition">?</span><span><strong>Condition</strong><small>Compare an input value</small></span><span class="palette-plus">+</span></button><button class="palette-card" draggable="true" data-add-node="outcome"><span class="palette-symbol palette-outcome">✓</span><span><strong>Outcome</strong><small>Return a decision</small></span><span class="palette-plus">+</span></button></div>${renderSchema()}<div class="left-help"><span>⌘</span><span>Drag a node onto the canvas. Connect output ports to inputs; keyboard users can select an output then an input.</span></div></aside>
       <section class="canvas-area"><div class="canvas-topline"><div><strong>Decision canvas</strong><span>${state.graph.nodes.length} nodes · ${state.graph.edges.length} connections</span></div><div class="canvas-tools"><button class="canvas-tool" data-action="zoom-out" aria-label="Zoom out">−</button><span class="zoom-label">${Math.round(state.zoom * 100)}%</span><button class="canvas-tool" data-action="zoom-in" aria-label="Zoom in">+</button><button class="canvas-tool fit-tool" data-action="fit" title="Fit graph">Fit</button><button id="delete-edge-button" class="canvas-tool" data-action="delete-edge" title="Select a connection to remove" aria-label="Delete selected connection" ${state.selectedEdgeId ? '' : 'disabled'}>Remove link</button></div></div><div class="canvas-viewport" id="canvas-viewport">${renderCanvasMarkup()}<div class="canvas-hint"><span class="hint-key">Esc</span> Cancel connection <span class="hint-divider">·</span> Drag canvas with space</div></div>${renderValidation()}</section>
@@ -824,6 +825,8 @@ app.addEventListener('click', async (event) => {
       showToast(`Saved immutable version ${data.version.versionNumber}.`, 'success');
       render();
     } else if (action === 'versions') await showVersionHistory();
+    else if (action === 'import-draft') document.querySelector('#import-draft-file')?.click();
+    else if (action === 'export-draft') exportDraft();
     else if (action === 'activity') await showProjectActivity();
     else if (action === 'undo') applyHistory('undo');
     else if (action === 'redo') applyHistory('redo');
@@ -913,6 +916,12 @@ app.addEventListener('input', (event) => {
 });
 
 app.addEventListener('change', (event) => {
+  if (event.target.id === 'import-draft-file') {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (file) importDraftFile(file).catch((error) => showToast(`Could not import draft: ${error.message}`, 'error'));
+    return;
+  }
   const field = event.target.dataset.fieldId && state.graph.schema.find((item) => item.id === event.target.dataset.fieldId);
   if (field) {
     const prop = event.target.dataset.fieldProp;
@@ -1022,6 +1031,47 @@ function downloadConflictCopy() {
   link.click();
   setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
   showToast('Downloaded the unsaved local draft copy.', 'success');
+}
+
+function exportDraft() {
+  const json = serializeRuleDraft({
+    rulesetId: state.ruleset.id,
+    name: document.querySelector('#ruleset-name')?.value ?? state.ruleset.name,
+    revision: state.revision,
+    graph: state.graph,
+  });
+  const objectUrl = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+  const link = document.createElement('a');
+  link.href = objectUrl;
+  link.download = `rulecanvas-draft-${state.ruleset.id}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+  showToast('Exported the current local draft.', 'success');
+}
+
+async function importDraftFile(file) {
+  if (file.size > 1_000_000) throw new Error('Draft file is larger than 1 MB.');
+  const imported = parseRuleDraft(await file.text());
+  const validation = await api(`/api/rulesets/${encodeURIComponent(state.ruleset.id)}/validate`, {
+    method: 'POST', body: JSON.stringify({ graph: imported.graph }),
+  });
+  if (!validation.valid) {
+    state.errors = validation.errors;
+    render();
+    showToast(`Import rejected: resolve ${validation.errors.length} graph issue${validation.errors.length === 1 ? '' : 's'} first.`, 'error');
+    return;
+  }
+  if (!confirmDiscard()) return;
+  checkpointHistory();
+  state.graph = structuredClone(imported.graph);
+  state.selectedNodeId = state.graph.nodes.find((node) => node.type !== 'start')?.id ?? 'start';
+  state.selectedEdgeId = null;
+  state.testInput = {};
+  state.result = null;
+  state.errors = [];
+  markDirty();
+  render();
+  showToast('Imported a valid graph. Save draft to keep it in this workspace.', 'success');
 }
 
 window.addEventListener('beforeunload', (event) => {
