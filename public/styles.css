@@ -139,6 +139,10 @@ h1 { margin: 0; font-size: clamp(26px, 3vw, 36px); line-height: 1.1; letter-spac
 .history-button:disabled { opacity: .4; cursor: not-allowed; }
 .save-status { color: #8a9890; font-size: 10px; margin-right: 7px; white-space: nowrap; }
 .save-status[data-state="unsaved"], .save-status[data-state="error"], .save-status[data-state="conflict"] { color: #bd745c; }
+.save-status .text-button { margin-left: 6px; padding: 2px 7px; border: 1px solid #e1e9e4; border-radius: 6px; background: #fff; color: #4b6656; font-size: 10px; font-weight: 600; cursor: pointer; text-decoration: none; vertical-align: middle; }
+.save-status .text-button:hover { background: #eef5f1; border-color: #cbe0d3; color: #2d553f; }
+.logic-term.is-invalid { border-color: #f2c7be; background: #fff8f6; }
+.form-control.is-invalid { border-color: #e5978b; color: #a45041; }
 .editor-workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: 236px minmax(420px, 1fr) 298px; }
 .editor-left, .editor-right { background: #fff; overflow: auto; }
 .editor-left { padding: 20px 15px 14px; border-right: 1px solid var(--line); }

@@ -16,6 +16,23 @@ const state = {
   history: createHistory(),
 };
 let toastTimer;
+let autosaveTimer;
+let retryTimer;
+
+function clearAutosaveTimers() {
+  clearTimeout(autosaveTimer);
+  clearTimeout(retryTimer);
+}
+
+function scheduleAutosave() {
+  if (state.view !== 'editor' || !state.ruleset || state.saveState === 'conflict') return;
+  clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(() => {
+    if (state.view === 'editor' && state.dirty && state.saveState !== 'saving' && state.saveState !== 'conflict') {
+      saveDraft({ isAutosave: true });
+    }
+  }, 1800);
+}
 
 const safeSvgNumber = (value) => Number.isFinite(value) ? String(value) : '0';
 const id = (prefix) => `${prefix}-${crypto.randomUUID()}`;
@@ -208,10 +225,13 @@ async function api(path, options = {}) {
 
 function markDirty() {
   state.dirty = true;
-  state.saveState = 'unsaved';
+  if (state.saveState !== 'conflict') {
+    state.saveState = 'unsaved';
+  }
   state.result = null;
   state.errors = [];
   renderEditorHeaderState();
+  scheduleAutosave();
 }
 
 function checkpointHistory(group = null) {
@@ -251,7 +271,17 @@ function renderEditorHeaderState() {
   const button = document.querySelector('#save-button');
   const versionButton = document.querySelector('#version-button');
   if (status) {
-    status.textContent = state.saveState === 'saving' ? 'Saving…' : state.dirty ? 'Unsaved changes' : `Saved · v${state.revision}`;
+    if (state.saveState === 'saving') {
+      status.textContent = 'Saving…';
+    } else if (state.saveState === 'conflict') {
+      status.innerHTML = 'Revision conflict · local draft retained <button class="text-button" data-action="download-conflict">Download local copy</button><button class="text-button" data-action="reload-ruleset">Reload server copy</button>';
+    } else if (state.saveState === 'error') {
+      status.innerHTML = 'Save failed · Draft preserved <button class="text-button" data-action="retry-save">Retry save</button>';
+    } else if (state.dirty) {
+      status.textContent = 'Unsaved changes';
+    } else {
+      status.textContent = `Saved · v${state.revision}`;
+    }
     status.dataset.state = state.dirty ? state.saveState : 'saved';
   }
   if (button) button.disabled = !state.dirty || state.saveState === 'saving';
@@ -266,6 +296,7 @@ async function loadProjects() {
 
 async function openProject(projectId) {
   if (!confirmDiscard()) return;
+  clearAutosaveTimers();
   const data = await api(`/api/projects/${encodeURIComponent(projectId)}`);
   state.project = data.project;
   state.ruleset = null;
@@ -278,6 +309,7 @@ async function openProject(projectId) {
 
 async function openRuleset(rulesetId) {
   if (!confirmDiscard()) return;
+  clearAutosaveTimers();
   const data = await api(`/api/rulesets/${encodeURIComponent(rulesetId)}`);
   state.ruleset = data.ruleset;
   state.graph = structuredClone(data.ruleset.graph);
@@ -437,13 +469,16 @@ function renderGroupTerm(term, path, depth = 0, budget = { remaining: 2048 }) {
     const children = terms.slice(0, 128).map((child, index) => renderGroupTerm(child, path ? `${path}.${index}` : String(index), depth + 1, budget)).join('');
     return `<div class="logic-term logic-subgroup"><div class="logic-term-heading"><select class="form-control logic-operator" data-group-path="${path}" data-group-prop="operator" aria-label="Nested group operator"><option value="and" ${term.operator === 'and' ? 'selected' : ''}>All (AND)</option><option value="or" ${term.operator === 'or' ? 'selected' : ''}>Any (OR)</option></select><div class="logic-term-actions"><button class="tiny-remove" data-group-action="add-condition" data-group-path="${path}" aria-label="Add condition to nested group">+</button><button class="tiny-remove" data-group-action="add-group" data-group-path="${path}" aria-label="Add nested group">⊞</button><button class="tiny-remove" data-group-action="remove-term" data-group-path="${path}" aria-label="Remove nested group" ${!groupTermRemovable(path) ? 'disabled' : ''}>×</button></div></div><div class="logic-term-children">${children}${terms.length > 128 ? '<p class="field-hint">This group exceeds the 128-term editor limit.</p>' : ''}</div></div>`;
   }
-  const field = state.graph.schema.find((item) => item.id === term.fieldId) ?? state.graph.schema[0];
+  const fieldExists = state.graph.schema.some((item) => item.id === term.fieldId);
+  const field = fieldExists ? state.graph.schema.find((item) => item.id === term.fieldId) : null;
   const operators = field ? operatorsFor(field.type) : [];
   const type = field?.type;
   let valueControl = `<input class="form-control logic-value" data-group-path="${path}" data-group-prop="value" type="${type === 'number' ? 'number' : type === 'date' ? 'date' : 'text'}" value="${escapeHtml(term.value ?? '')}" aria-label="Condition value"/>`;
   if (type === 'boolean') valueControl = `<select class="form-control logic-value" data-group-path="${path}" data-group-prop="value" aria-label="Condition value"><option value="true" ${term.value === true ? 'selected' : ''}>True</option><option value="false" ${term.value === false ? 'selected' : ''}>False</option></select>`;
   if (type === 'enum') valueControl = `<select class="form-control logic-value" data-group-path="${path}" data-group-prop="value" aria-label="Condition value">${(field.options ?? []).map((option) => `<option value="${escapeHtml(option)}" ${term.value === option ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('')}</select>`;
-  return `<div class="logic-term logic-leaf"><select class="form-control logic-field" data-group-path="${path}" data-group-prop="fieldId" aria-label="Condition field">${state.graph.schema.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === field?.id ? 'selected' : ''}>${escapeHtml(item.name)} · ${escapeHtml(item.type)}</option>`).join('')}</select><select class="form-control logic-operator" data-group-path="${path}" data-group-prop="operator" aria-label="Condition operator">${operators.map((operator) => `<option value="${operator}" ${term.operator === operator ? 'selected' : ''}>${escapeHtml(operatorLabels[operator])}</option>`).join('')}</select>${valueControl}<button class="tiny-remove" data-group-action="remove-term" data-group-path="${path}" aria-label="Remove condition" ${!groupTermRemovable(path) ? 'disabled' : ''}>×</button></div>`;
+  const missingOption = !fieldExists ? `<option value="" disabled selected>Missing field (select replacement)</option>` : '';
+  const termClass = `logic-term logic-leaf${!fieldExists ? ' is-invalid' : ''}`;
+  return `<div class="${termClass}"><select class="form-control logic-field ${!fieldExists ? 'is-invalid' : ''}" data-group-path="${path}" data-group-prop="fieldId" aria-label="Condition field">${missingOption}${state.graph.schema.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === field?.id ? 'selected' : ''}>${escapeHtml(item.name)} · ${escapeHtml(item.type)}</option>`).join('')}</select><select class="form-control logic-operator" data-group-path="${path}" data-group-prop="operator" aria-label="Condition operator">${operators.map((operator) => `<option value="${operator}" ${term.operator === operator ? 'selected' : ''}>${escapeHtml(operatorLabels[operator])}</option>`).join('')}</select>${valueControl}<button class="tiny-remove" data-group-action="remove-term" data-group-path="${path}" aria-label="Remove condition" ${!groupTermRemovable(path) ? 'disabled' : ''}>×</button></div>`;
 }
 
 function groupPath(path) {
@@ -523,14 +558,16 @@ function renderInspector() {
   if (node.type === 'start') return `<div class="inspector-content"><div class="selected-label"><span class="kind-dot kind-start"></span>START NODE</div><h3>Entry point</h3><p class="inspector-copy">Every evaluation begins here. Connect the next port to a condition or outcome node.</p></div>`;
   if (node.type === 'outcome') return `<div class="inspector-content"><div class="selected-label"><span class="kind-dot kind-outcome"></span>OUTCOME NODE</div><label class="form-label" for="outcome-label">Outcome name</label><input id="outcome-label" class="form-control" value="${escapeHtml(node.label)}" maxlength="60"/><label class="form-label" for="outcome-result">Result value (JSON)</label><textarea id="outcome-result" class="form-control code-input" rows="4">${escapeHtml(JSON.stringify(node.result ?? null, null, 2))}</textarea><p class="field-hint">The value returned when a path reaches this outcome.</p><button class="button button-danger-soft button-wide" data-action="delete-node">Delete node</button></div>`;
   if (node.type === 'group') return renderGroupInspector(node);
-  const field = state.graph.schema.find((item) => item.id === node.fieldId);
+  const fieldExists = state.graph.schema.some((item) => item.id === node.fieldId);
+  const field = fieldExists ? state.graph.schema.find((item) => item.id === node.fieldId) : null;
   const ops = field ? operatorsFor(field.type) : [];
   const value = node.value ?? '';
   const inputType = field?.type === 'number' ? 'number' : field?.type === 'date' ? 'date' : 'text';
   let valueControl = `<input id="condition-value" class="form-control" type="${inputType}" value="${escapeHtml(value)}"/>`;
   if (field?.type === 'boolean') valueControl = `<select id="condition-value" class="form-control"><option value="true" ${node.value === true ? 'selected' : ''}>True</option><option value="false" ${node.value === false ? 'selected' : ''}>False</option></select>`;
   if (field?.type === 'enum') valueControl = `<select id="condition-value" class="form-control">${(field.options ?? []).map((option) => `<option value="${escapeHtml(option)}" ${node.value === option ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('')}</select>`;
-  return `<div class="inspector-content"><div class="selected-label"><span class="kind-dot kind-condition"></span>CONDITION NODE</div><label class="form-label" for="condition-field">Input field</label><select id="condition-field" class="form-control">${state.graph.schema.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === node.fieldId ? 'selected' : ''}>${escapeHtml(item.name)} · ${escapeHtml(item.type)}</option>`).join('')}</select>${field?.type === 'enum' ? `<p class="field-hint">Options: ${escapeHtml((field.options ?? []).join(', '))}</p>` : ''}<label class="form-label" for="condition-operator">Operator</label><select id="condition-operator" class="form-control">${ops.map((operator) => `<option value="${operator}" ${node.operator === operator ? 'selected' : ''}>${operatorLabels[operator]}</option>`).join('')}</select><label class="form-label" for="condition-value">Compare to</label>${valueControl}<div class="branch-note"><span class="branch-yes-dot"></span>Yes follows the true port <span class="branch-no-dot"></span>No follows the false port</div><button class="button button-danger-soft button-wide" data-action="delete-node">Delete node</button></div>`;
+  const missingOption = !fieldExists ? `<option value="" disabled selected>Missing field (select replacement)</option>` : '';
+  return `<div class="inspector-content"><div class="selected-label"><span class="kind-dot kind-condition"></span>CONDITION NODE</div><label class="form-label" for="condition-field">Input field</label><select id="condition-field" class="form-control ${!fieldExists ? 'is-invalid' : ''}">${missingOption}${state.graph.schema.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === node.fieldId ? 'selected' : ''}>${escapeHtml(item.name)} · ${escapeHtml(item.type)}</option>`).join('')}</select>${field?.type === 'enum' ? `<p class="field-hint">Options: ${escapeHtml((field.options ?? []).join(', '))}</p>` : ''}<label class="form-label" for="condition-operator">Operator</label><select id="condition-operator" class="form-control">${ops.map((operator) => `<option value="${operator}" ${node.operator === operator ? 'selected' : ''}>${operatorLabels[operator]}</option>`).join('')}</select><label class="form-label" for="condition-value">Compare to</label>${valueControl}<div class="branch-note"><span class="branch-yes-dot"></span>Yes follows the true port <span class="branch-no-dot"></span>No follows the false port</div><button class="button button-danger-soft button-wide" data-action="delete-node">Delete node</button></div>`;
 }
 
 function renderGroupTraceTerm(term) {
@@ -567,12 +604,12 @@ function renderTestPanel() {
       ? `<div class="evaluation-result is-success"><div class="result-outcome"><span class="result-check">✓</span><span><small>DECISION</small><strong>${escapeHtml(state.result.trace.at(-1)?.label)}</strong></span><code>${escapeHtml(JSON.stringify(state.result.result))}</code></div><ol class="trace-list">${state.result.trace.map((entry) => `<li><span class="trace-index">${escapeHtml(entry.nodeId)}</span><span>${renderTraceEntry(entry)}</span></li>`).join('')}</ol></div>`
       : `<div class="evaluation-result is-error"><strong>Could not evaluate</strong><ul>${state.result.errors.map((error) => `<li>${escapeHtml(error.message)}</li>`).join('')}</ul></div>`;
   }
-  return `<div class="test-panel"><div class="panel-heading"><div><h3>Test a decision</h3><p>Try sample input without changing the saved graph.</p></div></div>${fields.length ? `<div class="test-fields">${inputs}</div>` : `<p class="panel-empty">Add input fields before testing a decision.</p>`}<div class="test-actions"><button class="button button-primary button-wide" data-action="evaluate" ${fields.length ? '' : 'disabled'}>Run test <span>→</span></button><button class="text-button" data-action="clear-test">Clear</button></div>${result}</div>`;
+  return `<div class="test-panel"><div class="panel-heading"><div><h3>Test a decision</h3><p>Try sample input without changing the saved graph.</p></div></div>${fields.length ? `<div class="test-fields">${inputs}</div>` : `<p class="panel-empty">No input fields needed for unconditional rules, or add fields to test conditions.</p>`}<div class="test-actions"><button class="button button-primary button-wide" data-action="evaluate">Run test <span>→</span></button><button class="text-button" data-action="clear-test">Clear</button></div>${result}</div>`;
 }
 
 function renderValidation() {
   if (!state.errors.length) return '';
-  return `<div class="validation-banner ${state.errors.some((error) => error.code === 'graph.unreachable' || error.code === 'graph.cycle') ? 'is-error' : ''}"><div class="validation-title">${state.errors.length} item${state.errors.length === 1 ? '' : 's'} to review</div><ul>${state.errors.map((error) => `<li>${escapeHtml(error.message)}${error.nodeId ? ` <button class="error-link" data-focus-node="${escapeHtml(error.nodeId)}">Select node</button>` : ''}</li>`).join('')}</ul></div>`;
+  return `<div class="validation-banner ${state.errors.some((error) => error.code === 'graph.unreachable' || error.code === 'graph.cycle') ? 'is-error' : ''}"><div class="validation-title">${state.errors.length} item${state.errors.length === 1 ? '' : 's'} to review</div><ul>${state.errors.map((error) => `<li>${escapeHtml(error.message)}${error.termPath ? ` (term ${escapeHtml(error.termPath)})` : ''}${error.nodeId ? ` <button class="error-link" data-focus-node="${escapeHtml(error.nodeId)}">Select node</button>` : ''}</li>`).join('')}</ul></div>`;
 }
 
 function renderEditor() {
@@ -589,7 +626,11 @@ function renderEditor() {
 }
 
 function parseTypedValue(input, type) {
-  if (type === 'number') return Number(input.value);
+  if (type === 'number') {
+    if (input.value === '' || input.value === null || input.value === undefined) return null;
+    const num = Number(input.value);
+    return Number.isFinite(num) ? num : null;
+  }
   if (type === 'boolean') return input.value === 'true';
   return input.value;
 }
@@ -639,7 +680,12 @@ function updateField(fieldId, updates) {
     if (term.type === 'group') { term.terms?.forEach(normalizeLeaf); return; }
     if (term.fieldId !== field.id) return;
     if (!operatorsFor(field.type).includes(term.operator)) term.operator = 'eq';
-    if (term.value === undefined || (field.type === 'number' && typeof term.value !== 'number') || (field.type === 'boolean' && typeof term.value !== 'boolean') || (field.type === 'enum' && !field.options?.includes(term.value))) term.value = defaultTermValue(field);
+    if (field.type === 'number' && typeof term.value !== 'number') term.value = 0;
+    else if (field.type === 'boolean' && typeof term.value !== 'boolean') term.value = true;
+    else if (field.type === 'date' && (typeof term.value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(term.value))) term.value = '2026-01-01';
+    else if (field.type === 'enum' && !field.options?.includes(term.value)) term.value = field.options?.[0] ?? '';
+    else if ((field.type === 'string' || field.type === 'enum') && typeof term.value !== 'string') term.value = '';
+    else if (term.value === undefined) term.value = defaultTermValue(field);
   };
   for (const node of state.graph.nodes) {
     if (node.type === 'group') {
@@ -834,11 +880,16 @@ function updateZoomLabel() {
   if (label) label.textContent = `${Math.round(state.zoom * 100)}%`;
 }
 
-async function saveDraft() {
-  if (!state.dirty || state.saveState === 'saving') return;
+async function saveDraft({ isAutosave = false } = {}) {
+  if (!state.dirty || state.saveState === 'saving' || state.saveState === 'conflict') return;
   const invalidResult = document.querySelector('#outcome-result:invalid');
-  if (invalidResult) { invalidResult.reportValidity(); return; }
-  state.saveState = 'saving'; renderEditorHeaderState();
+  if (invalidResult) {
+    if (!isAutosave) invalidResult.reportValidity();
+    return;
+  }
+  clearAutosaveTimers();
+  state.saveState = 'saving';
+  renderEditorHeaderState();
   try {
     const data = await api(`/api/rulesets/${encodeURIComponent(state.ruleset.id)}`, {
       method: 'PUT', body: JSON.stringify({ expectedRevision: state.revision, name: document.querySelector('#ruleset-name')?.value ?? state.ruleset.name, graph: state.graph }),
@@ -846,10 +897,12 @@ async function saveDraft() {
     state.ruleset = data.ruleset;
     state.graph = structuredClone(data.ruleset.graph);
     state.revision = data.ruleset.revision;
-    state.dirty = false; state.saveState = 'saved';
+    state.dirty = false;
+    state.saveState = 'saved';
     state.recovered = false;
     state.project = (await api(`/api/projects/${encodeURIComponent(state.project.id)}`)).project;
-    showToast('Draft saved to this workspace.', 'success'); render();
+    showToast(isAutosave ? 'Draft autosaved.' : 'Draft saved to this workspace.', 'success');
+    render();
   } catch (error) {
     state.saveState = error.status === 409 ? 'conflict' : 'error';
     renderEditorHeaderState();
@@ -857,7 +910,19 @@ async function saveDraft() {
       showToast('This draft changed elsewhere. Reload it before continuing.', 'error');
       const status = document.querySelector('#save-status');
       if (status) status.innerHTML = 'Revision conflict · local draft retained <button class="text-button" data-action="download-conflict">Download local copy</button><button class="text-button" data-action="reload-ruleset">Reload server copy</button>';
-    } else showToast(`Could not save: ${error.message}`, 'error');
+    } else {
+      showToast(`Could not save: ${error.message}. Draft preserved locally.`, 'error');
+      const status = document.querySelector('#save-status');
+      if (status) status.innerHTML = 'Save failed · Draft preserved <button class="text-button" data-action="retry-save">Retry save</button>';
+      if (isAutosave) {
+        clearTimeout(retryTimer);
+        retryTimer = setTimeout(() => {
+          if (state.dirty && state.saveState === 'error') {
+            saveDraft({ isAutosave: true });
+          }
+        }, 5000);
+      }
+    }
   }
 }
 
@@ -879,7 +944,10 @@ async function evaluateDraft() {
   document.querySelectorAll('[data-test-field]').forEach((control) => {
     const field = state.graph.schema.find((item) => item.name === control.dataset.testField);
     if (!field || !shouldIncludeTypedValue(field, control.value)) return;
-    input[control.dataset.testField] = parseTypedValue(control, field.type);
+    const val = parseTypedValue(control, field.type);
+    if (val !== null || field.type === 'string') {
+      input[control.dataset.testField] = val;
+    }
   });
   try {
     state.result = await api(`/api/rulesets/${encodeURIComponent(state.ruleset.id)}/evaluate`, { method: 'POST', body: JSON.stringify({ input }) });
@@ -942,8 +1010,11 @@ app.addEventListener('click', async (event) => {
   if (groupActionButton) { addGroupTerm(groupActionButton.dataset.groupAction, groupActionButton.dataset.groupPath); return; }
   if (!action) return;
   try {
-    if (action === 'dashboard') {
+    if (action === 'add-field') addField();
+    else if (action === 'retry-save') await saveDraft();
+    else if (action === 'dashboard') {
       if (!confirmDiscard()) return;
+      clearAutosaveTimers();
       await loadProjects(); state.project = null; state.ruleset = null; state.graph = null; state.view = 'dashboard'; render();
     } else if (action === 'new-project') {
       const name = await askForName('project');
@@ -1013,7 +1084,12 @@ app.addEventListener('input', (event) => {
     const field = state.graph?.schema.find((item) => item.id === event.target.dataset.fieldId);
     if (field && field.name !== event.target.value) {
       checkpointHistory(`field-name:${field.id}`);
+      const oldName = field.name;
       field.name = event.target.value;
+      if (oldName in state.testInput) {
+        state.testInput[field.name] = state.testInput[oldName];
+        delete state.testInput[oldName];
+      }
       markDirty();
     }
     return;
@@ -1063,10 +1139,24 @@ app.addEventListener('change', (event) => {
     if (file) importDraftFile(file).catch((error) => showToast(`Could not import draft: ${error.message}`, 'error'));
     return;
   }
+  const testField = event.target.dataset.testField;
+  if (testField) {
+    const field = state.graph.schema.find((item) => item.name === testField);
+    if (field) state.testInput[testField] = parseTypedValue(event.target, field.type);
+    return;
+  }
   const field = event.target.dataset.fieldId && state.graph.schema.find((item) => item.id === event.target.dataset.fieldId);
   if (field) {
     const prop = event.target.dataset.fieldProp;
-    if (prop === 'name') { field.name = event.target.value.trim(); markDirty(); render(); }
+    if (prop === 'name') {
+      const oldName = field.name;
+      field.name = event.target.value.trim();
+      if (oldName in state.testInput) {
+        state.testInput[field.name] = state.testInput[oldName];
+        delete state.testInput[oldName];
+      }
+      markDirty(); render();
+    }
     if (prop === 'type') {
       const type = event.target.value;
       updateField(field.id, { type, options: type === 'enum' ? ['Option A', 'Option B'] : undefined });

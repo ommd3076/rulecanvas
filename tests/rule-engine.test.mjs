@@ -208,3 +208,53 @@ test('rejects malformed, untyped, oversized and deeply nested logical groups', (
   }
   assert.ok(validateGraph(tooDeep).errors.some((error) => error.code === 'group.depth' || error.code === 'group.terms'));
 });
+
+test('evaluates an unconditional graph with empty schema using empty input object', () => {
+  const unconditionalGraph = {
+    schema: [],
+    nodes: [
+      { id: 'start', type: 'start', x: 100, y: 220 },
+      { id: 'outcome-approved', type: 'outcome', x: 710, y: 135, label: 'Approved Outcome', result: 'approved' },
+    ],
+    edges: [
+      { id: 'start-outcome', from: 'start', fromPort: 'next', to: 'outcome-approved', toPort: 'in' },
+    ],
+  };
+  const validation = validateGraph(unconditionalGraph);
+  assert.equal(validation.valid, true);
+  assert.deepEqual(validation.errors, []);
+  const evaluation = evaluateGraph(unconditionalGraph, {});
+  assert.equal(evaluation.ok, true);
+  assert.equal(evaluation.result, 'approved');
+  assert.equal(evaluation.outcomeId, 'outcome-approved');
+  assert.deepEqual(evaluation.trace, [
+    { nodeId: 'start', kind: 'start', label: 'Start' },
+    { nodeId: 'outcome-approved', kind: 'outcome', label: 'Approved Outcome', result: 'approved' },
+  ]);
+});
+
+test('evaluates graph with default schema field name containing spaces such as Input 1', () => {
+  const defaultFieldGraph = {
+    schema: [
+      { id: 'field-1', name: 'Input 1', type: 'string', required: true },
+    ],
+    nodes: [
+      { id: 'start', type: 'start', x: 100, y: 220 },
+      { id: 'check', type: 'condition', x: 400, y: 220, fieldId: 'field-1', operator: 'eq', value: 'verified' },
+      { id: 'yes', type: 'outcome', x: 700, y: 140, label: 'Passed', result: { status: 'passed' } },
+      { id: 'no', type: 'outcome', x: 700, y: 320, label: 'Failed', result: { status: 'failed' } },
+    ],
+    edges: [
+      { id: 'e1', from: 'start', fromPort: 'next', to: 'check', toPort: 'in' },
+      { id: 'e2', from: 'check', fromPort: 'true', to: 'yes', toPort: 'in' },
+      { id: 'e3', from: 'check', fromPort: 'false', to: 'no', toPort: 'in' },
+    ],
+  };
+  assert.equal(validateGraph(defaultFieldGraph).valid, true);
+  const match = evaluateGraph(defaultFieldGraph, { 'Input 1': 'verified' });
+  assert.equal(match.ok, true);
+  assert.deepEqual(match.result, { status: 'passed' });
+  const noMatch = evaluateGraph(defaultFieldGraph, { 'Input 1': 'other' });
+  assert.equal(noMatch.ok, true);
+  assert.deepEqual(noMatch.result, { status: 'failed' });
+});

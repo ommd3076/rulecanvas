@@ -252,3 +252,63 @@ test('health reports recovery after the app loads a prior local checkpoint', asy
   const health = await jsonRequest(base, '/api/health');
   assert.equal(health.body.recovered, true);
 });
+
+test('creates and evaluates an unconditional ruleset with empty schema through HTTP API', async (t) => {
+  const base = await startServer(t);
+  const project = (await jsonRequest(base, '/api/projects', { method: 'POST', body: JSON.stringify({ name: 'Unconditional Test' }) })).body.project;
+  const ruleset = (await jsonRequest(base, `/api/projects/${project.id}/rulesets`, { method: 'POST', body: JSON.stringify({ name: 'Always Approve' }) })).body.ruleset;
+  const graph = {
+    schema: [],
+    nodes: [
+      { id: 'start', type: 'start', x: 100, y: 220 },
+      { id: 'outcome-1', type: 'outcome', x: 710, y: 135, label: 'Approved', result: 'approved' },
+    ],
+    edges: [
+      { id: 'e1', from: 'start', fromPort: 'next', to: 'outcome-1', toPort: 'in' },
+    ],
+  };
+  const save = await jsonRequest(base, `/api/rulesets/${ruleset.id}`, { method: 'PUT', body: JSON.stringify({ expectedRevision: 1, name: ruleset.name, graph }) });
+  assert.equal(save.status, 200);
+
+  const validation = await jsonRequest(base, `/api/rulesets/${ruleset.id}/validate`, { method: 'POST', body: JSON.stringify({}) });
+  assert.equal(validation.body.valid, true);
+  assert.deepEqual(validation.body.errors, []);
+
+  const evaluation = await jsonRequest(base, `/api/rulesets/${ruleset.id}/evaluate`, { method: 'POST', body: JSON.stringify({ input: {} }) });
+  assert.equal(evaluation.body.ok, true);
+  assert.equal(evaluation.body.result, 'approved');
+  assert.equal(evaluation.body.outcomeId, 'outcome-1');
+  assert.deepEqual(evaluation.body.trace.map((item) => item.nodeId), ['start', 'outcome-1']);
+});
+
+test('evaluates ruleset with default schema field name Input 1 through HTTP API', async (t) => {
+  const base = await startServer(t);
+  const project = (await jsonRequest(base, '/api/projects', { method: 'POST', body: JSON.stringify({ name: 'Default Field Name' }) })).body.project;
+  const ruleset = (await jsonRequest(base, `/api/projects/${project.id}/rulesets`, { method: 'POST', body: JSON.stringify({ name: 'Input 1 Rule' }) })).body.ruleset;
+  const graph = {
+    schema: [
+      { id: 'f-1', name: 'Input 1', type: 'string', required: true },
+    ],
+    nodes: [
+      { id: 'start', type: 'start', x: 100, y: 220 },
+      { id: 'cond-1', type: 'condition', x: 400, y: 220, fieldId: 'f-1', operator: 'eq', value: 'hello' },
+      { id: 'outcome-yes', type: 'outcome', x: 700, y: 100, label: 'Yes', result: true },
+      { id: 'outcome-no', type: 'outcome', x: 700, y: 300, label: 'No', result: false },
+    ],
+    edges: [
+      { id: 'e1', from: 'start', fromPort: 'next', to: 'cond-1', toPort: 'in' },
+      { id: 'e2', from: 'cond-1', fromPort: 'true', to: 'outcome-yes', toPort: 'in' },
+      { id: 'e3', from: 'cond-1', fromPort: 'false', to: 'outcome-no', toPort: 'in' },
+    ],
+  };
+  const save = await jsonRequest(base, `/api/rulesets/${ruleset.id}`, { method: 'PUT', body: JSON.stringify({ expectedRevision: 1, name: ruleset.name, graph }) });
+  assert.equal(save.status, 200);
+
+  const match = await jsonRequest(base, `/api/rulesets/${ruleset.id}/evaluate`, { method: 'POST', body: JSON.stringify({ input: { 'Input 1': 'hello' } }) });
+  assert.equal(match.body.ok, true);
+  assert.equal(match.body.result, true);
+
+  const noMatch = await jsonRequest(base, `/api/rulesets/${ruleset.id}/evaluate`, { method: 'POST', body: JSON.stringify({ input: { 'Input 1': 'world' } }) });
+  assert.equal(noMatch.body.ok, true);
+  assert.equal(noMatch.body.result, false);
+});
