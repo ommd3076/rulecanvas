@@ -198,6 +198,7 @@ test('serves app assets from the public directory and blocks traversal', async (
   const conflictCopyModule = await fetch(`${base}/conflict-copy.js`);
   const transferModule = await fetch(`${base}/rule-transfer.js`);
   const typedInputModule = await fetch(`${base}/typed-input.js`);
+  const saveCoordinationModule = await fetch(`${base}/save-coordination.js`);
   assert.equal(appScript.status, 200);
   assert.match(appScript.headers.get('content-type'), /javascript/);
   assert.equal(historyModule.status, 200);
@@ -210,6 +211,8 @@ test('serves app assets from the public directory and blocks traversal', async (
   assert.match(transferModule.headers.get('content-type'), /javascript/);
   assert.equal(typedInputModule.status, 200);
   assert.match(typedInputModule.headers.get('content-type'), /javascript/);
+  assert.equal(saveCoordinationModule.status, 200);
+  assert.match(saveCoordinationModule.headers.get('content-type'), /javascript/);
   const traversal = await fetch(`${base}/%2e%2e/src/server.mjs`);
   assert.equal(traversal.status, 404);
 });

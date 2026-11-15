@@ -258,3 +258,74 @@ test('evaluates graph with default schema field name containing spaces such as I
   assert.equal(noMatch.ok, true);
   assert.deepEqual(noMatch.result, { status: 'failed' });
 });
+
+test('evaluates scholarship eligibility boundary conditions accurately across the full matrix', () => {
+  const scholarshipGraph = {
+    schema: [
+      { id: 'f-cgpa', name: 'cgpa', type: 'number', required: true },
+      { id: 'f-income', name: 'familyIncome', type: 'number', required: true },
+      { id: 'f-backlogs', name: 'backlogs', type: 'number', required: true },
+    ],
+    nodes: [
+      { id: 'start', type: 'start', x: 50, y: 150 },
+      {
+        id: 'eligibility-group',
+        type: 'group',
+        operator: 'and',
+        terms: [
+          { type: 'condition', fieldId: 'f-cgpa', operator: 'gte', value: 8.0 },
+          { type: 'condition', fieldId: 'f-income', operator: 'lte', value: 600000 },
+          { type: 'condition', fieldId: 'f-backlogs', operator: 'eq', value: 0 },
+        ],
+        x: 350,
+        y: 150,
+      },
+      { id: 'outcome-eligible', type: 'outcome', label: 'Eligible', result: 'ELIGIBLE', x: 700, y: 50 },
+      { id: 'outcome-ineligible', type: 'outcome', label: 'Not Eligible', result: 'NOT_ELIGIBLE', x: 700, y: 250 },
+    ],
+    edges: [
+      { id: 'e-start', from: 'start', fromPort: 'next', to: 'eligibility-group', toPort: 'in' },
+      { id: 'e-true', from: 'eligibility-group', fromPort: 'true', to: 'outcome-eligible', toPort: 'in' },
+      { id: 'e-false', from: 'eligibility-group', fromPort: 'false', to: 'outcome-ineligible', toPort: 'in' },
+    ],
+  };
+
+  assert.equal(validateGraph(scholarshipGraph).valid, true);
+
+  const vectors = [
+    { cgpa: 7.99, familyIncome: 599999, backlogs: 0, expected: 'NOT_ELIGIBLE' },
+    { cgpa: 8.00, familyIncome: 599999, backlogs: 0, expected: 'ELIGIBLE' },
+    { cgpa: 8.01, familyIncome: 599999, backlogs: 0, expected: 'ELIGIBLE' },
+    { cgpa: 8.00, familyIncome: 600000, backlogs: 0, expected: 'ELIGIBLE' },
+    { cgpa: 8.00, familyIncome: 600001, backlogs: 0, expected: 'NOT_ELIGIBLE' },
+    { cgpa: 8.00, familyIncome: 599999, backlogs: 1, expected: 'NOT_ELIGIBLE' },
+    { cgpa: 7.99, familyIncome: 600001, backlogs: 1, expected: 'NOT_ELIGIBLE' },
+    { cgpa: 8.01, familyIncome: 600000, backlogs: 0, expected: 'ELIGIBLE' },
+  ];
+
+  for (const v of vectors) {
+    const res = evaluateGraph(scholarshipGraph, { cgpa: v.cgpa, familyIncome: v.familyIncome, backlogs: v.backlogs });
+    assert.equal(res.ok, true);
+    assert.equal(res.result, v.expected);
+    assert.equal(res.trace.length, 3);
+    assert.equal(res.trace[0].kind, 'start');
+    assert.equal(res.trace[1].kind, 'group');
+    assert.equal(res.trace[1].terms.length, 3);
+    assert.equal(res.trace[2].kind, 'outcome');
+  }
+
+  // Verify full 3 x 3 x 2 cross product
+  const cgpaValues = [7.99, 8.00, 8.01];
+  const incomeValues = [599999, 600000, 600001];
+  const backlogValues = [0, 1];
+  for (const cgpa of cgpaValues) {
+    for (const familyIncome of incomeValues) {
+      for (const backlogs of backlogValues) {
+        const expected = (cgpa >= 8.0 && familyIncome <= 600000 && backlogs === 0) ? 'ELIGIBLE' : 'NOT_ELIGIBLE';
+        const evalRes = evaluateGraph(scholarshipGraph, { cgpa, familyIncome, backlogs });
+        assert.equal(evalRes.ok, true);
+        assert.equal(evalRes.result, expected);
+      }
+    }
+  }
+});

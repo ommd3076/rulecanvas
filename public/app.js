@@ -4,11 +4,13 @@ import { removeConnection } from './graph-editing.js';
 import { serializeConflictCopy } from './conflict-copy.js';
 import { parseRuleDraft, serializeRuleDraft } from './rule-transfer.js';
 import { shouldIncludeTypedValue } from './typed-input.js';
+import { applySaveSuccess } from './save-coordination.js';
 
 const app = document.querySelector('#app');
 const toast = document.querySelector('#toast');
 const state = {
   projects: [], project: null, ruleset: null, graph: null, revision: 0,
+  editGeneration: 0,
   view: 'dashboard', selectedNodeId: null, selectedEdgeId: null, dirty: false, connectionSource: null,
   recovered: false,
   connectionPointer: null, drag: null, zoom: 1, offset: { x: 0, y: 0 },
@@ -224,8 +226,9 @@ async function api(path, options = {}) {
 }
 
 function markDirty() {
+  state.editGeneration++;
   state.dirty = true;
-  if (state.saveState !== 'conflict') {
+  if (state.saveState !== 'conflict' && state.saveState !== 'saving') {
     state.saveState = 'unsaved';
   }
   state.result = null;
@@ -880,50 +883,109 @@ function updateZoomLabel() {
   if (label) label.textContent = `${Math.round(state.zoom * 100)}%`;
 }
 
+let inFlightSave = null;
+
 async function saveDraft({ isAutosave = false } = {}) {
-  if (!state.dirty || state.saveState === 'saving' || state.saveState === 'conflict') return;
+  if (!state.dirty || state.saveState === 'conflict') return;
+  if (inFlightSave) {
+    scheduleAutosave();
+    return inFlightSave;
+  }
   const invalidResult = document.querySelector('#outcome-result:invalid');
   if (invalidResult) {
     if (!isAutosave) invalidResult.reportValidity();
     return;
   }
   clearAutosaveTimers();
+
+  const targetRulesetId = state.ruleset?.id;
+  const targetProjectId = state.project?.id;
+  const targetRevision = state.revision;
+  const savedGeneration = state.editGeneration;
+  const snapshotGraph = structuredClone(state.graph);
+  const snapshotName = document.querySelector('#ruleset-name')?.value ?? state.ruleset?.name;
+
   state.saveState = 'saving';
   renderEditorHeaderState();
-  try {
-    const data = await api(`/api/rulesets/${encodeURIComponent(state.ruleset.id)}`, {
-      method: 'PUT', body: JSON.stringify({ expectedRevision: state.revision, name: document.querySelector('#ruleset-name')?.value ?? state.ruleset.name, graph: state.graph }),
-    });
-    state.ruleset = data.ruleset;
-    state.graph = structuredClone(data.ruleset.graph);
-    state.revision = data.ruleset.revision;
-    state.dirty = false;
-    state.saveState = 'saved';
-    state.recovered = false;
-    state.project = (await api(`/api/projects/${encodeURIComponent(state.project.id)}`)).project;
-    showToast(isAutosave ? 'Draft autosaved.' : 'Draft saved to this workspace.', 'success');
-    render();
-  } catch (error) {
-    state.saveState = error.status === 409 ? 'conflict' : 'error';
-    renderEditorHeaderState();
-    if (error.status === 409) {
-      showToast('This draft changed elsewhere. Reload it before continuing.', 'error');
-      const status = document.querySelector('#save-status');
-      if (status) status.innerHTML = 'Revision conflict · local draft retained <button class="text-button" data-action="download-conflict">Download local copy</button><button class="text-button" data-action="reload-ruleset">Reload server copy</button>';
-    } else {
-      showToast(`Could not save: ${error.message}. Draft preserved locally.`, 'error');
-      const status = document.querySelector('#save-status');
-      if (status) status.innerHTML = 'Save failed · Draft preserved <button class="text-button" data-action="retry-save">Retry save</button>';
-      if (isAutosave) {
-        clearTimeout(retryTimer);
-        retryTimer = setTimeout(() => {
-          if (state.dirty && state.saveState === 'error') {
-            saveDraft({ isAutosave: true });
+
+  const runSave = async () => {
+    try {
+      const data = await api(`/api/rulesets/${encodeURIComponent(targetRulesetId)}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          expectedRevision: targetRevision,
+          name: snapshotName,
+          graph: snapshotGraph,
+        }),
+      });
+
+      const outcome = applySaveSuccess({
+        state,
+        targetRulesetId,
+        targetProjectId,
+        savedGeneration,
+        newRevision: data.ruleset.revision,
+        serverGraph: data.ruleset.graph,
+      });
+
+      if (state.project && state.project.id === targetProjectId) {
+        try {
+          const projectData = await api(`/api/projects/${encodeURIComponent(targetProjectId)}`);
+          if (state.project && state.project.id === targetProjectId) {
+            state.project = projectData.project;
           }
-        }, 5000);
+        } catch {
+          // Non-fatal if project refresh fails
+        }
       }
+
+      if (outcome.viewChanged) return;
+
+      if (outcome.shouldRerunSave) {
+        renderEditorHeaderState();
+        scheduleAutosave();
+        return;
+      }
+
+      showToast(isAutosave ? 'Draft autosaved.' : 'Draft saved to this workspace.', 'success');
+      if (isAutosave) {
+        renderEditorHeaderState();
+      } else {
+        render();
+      }
+    } catch (error) {
+      if (state.view === 'editor' && state.ruleset?.id === targetRulesetId) {
+        state.saveState = error.status === 409 ? 'conflict' : 'error';
+        renderEditorHeaderState();
+        if (error.status === 409) {
+          showToast('This draft changed elsewhere. Reload it before continuing.', 'error');
+          const status = document.querySelector('#save-status');
+          if (status) {
+            status.innerHTML = 'Revision conflict · local draft retained <button class="text-button" data-action="download-conflict">Download local copy</button><button class="text-button" data-action="reload-ruleset">Reload server copy</button>';
+          }
+        } else {
+          showToast(`Could not save: ${error.message}. Draft preserved locally.`, 'error');
+          const status = document.querySelector('#save-status');
+          if (status) {
+            status.innerHTML = 'Save failed · Draft preserved <button class="text-button" data-action="retry-save">Retry save</button>';
+          }
+          if (isAutosave) {
+            clearTimeout(retryTimer);
+            retryTimer = setTimeout(() => {
+              if (state.dirty && state.saveState === 'error') {
+                saveDraft({ isAutosave: true });
+              }
+            }, 5000);
+          }
+        }
+      }
+    } finally {
+      inFlightSave = null;
     }
-  }
+  };
+
+  inFlightSave = runSave();
+  return inFlightSave;
 }
 
 async function validateDraft() {
