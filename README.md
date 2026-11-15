@@ -1,39 +1,51 @@
 # RuleCanvas
 
-RuleCanvas is a visual workspace for creating, validating, and evaluating deterministic business rules. Its goal is to make rule behavior inspectable: people should be able to see how a decision was reached, change a draft safely, and reproduce an evaluation against a specific version.
+RuleCanvas is a visual workbench for building, validating, and evaluating deterministic business rules. This checkout is a new implementation started because the original application source and repository were not available; it does not claim to contain imported history or existing application code.
 
-## Product goals
+## Current vertical slice
 
-- Build typed rule graphs with explicit conditions, branches, and outcomes.
-- Catch invalid connections, cycles, unreachable nodes, and incomplete paths before evaluation.
-- Evaluate a saved rule version deterministically and return a node-by-node explanation.
-- Keep draft editing, validation, publishing, version history, and audit events distinct.
-- Make graph editing usable with pointer and keyboard input, without allowing layout to change rule meaning.
+- Create a named project and reopen it from local JSON storage.
+- Create a draft ruleset with a persistent revision number.
+- Edit an interactive SVG graph: drag condition and outcome nodes from the palette, move nodes, and connect typed flow ports by pointer or keyboard.
+- Define typed input fields (`string`, `number`, `boolean`, `date`, and `enum`), required state, and enum options.
+- Validate branch completeness, edge compatibility, duplicate IDs, missing references, cycles, and unreachable nodes.
+- Evaluate a saved graph against typed input and return a deterministic result with an ordered node-ID trace.
+- Reject stale concurrent draft writes with a revision conflict instead of silently overwriting.
+- Keep node coordinates as layout metadata; evaluation semantics use node and edge data only.
 
-## Project status
+## Run locally
 
-This repository is currently a product brief. The original application source has not yet been located, so no framework, API, database, graph format, or implementation is claimed here. Implementation should begin only after the existing source and its history are recovered or the product owner supplies the intended starting point.
+Requires Node.js 22 or newer. No third-party runtime packages are required.
 
-## Design principles
+```sh
+npm test
+npm run check
+npm start
+```
 
-- Rule evaluation follows explicit graph data and ordering, never visual position.
-- A fixed rule version and input produce the same result and stable explanation.
-- Invalid or ambiguous rules return actionable validation errors instead of silently selecting an outcome.
-- Published versions remain immutable; drafts can be edited and reopened.
-- Dashboards and status indicators reflect persisted state, or clearly identify themselves as empty/demo states.
-- Keep the interface calm and practical: light surfaces, muted solid accents, restrained borders, and no gradients.
+Open `http://127.0.0.1:4178`. By default, project data is written to `data/rulecanvas.json`, which is ignored by Git. Set `RULECANVAS_DATA_FILE` to use another local path.
 
-## Development approach
+## Architecture and scope
 
-The first implementation milestone should be a complete vertical slice using the recovered application's actual architecture:
+- `src/rule-engine.mjs` contains pure graph validation, typed input validation, and deterministic evaluation.
+- `src/storage.mjs` serializes local JSON file changes with atomic replacement and per-process optimistic revisions.
+- `src/server.mjs` serves the app and a small JSON API, binding to `127.0.0.1` by default.
+- `public/` contains the dependency-free HTML, CSS, SVG canvas, and browser interaction code.
 
-1. Create and persist a project.
-2. Create a typed draft rule graph and save/reopen it.
-3. Validate graph structure and typed inputs.
-4. Evaluate boundary cases and show a stable, node-identified trace.
-5. Verify the same result after reload and against an explicit rule version.
+This is a local single-user prototype. It has no authentication, role system, remote database, multi-process locking, audit history, immutable published versions, or production deployment. Local file persistence and a same-process conflict test do not establish production durability or multi-user concurrency. Do not bind this server to a public interface.
 
-Do not replace an existing application with a speculative stack or mock-only presentation. See the product owner's implementation guide for the source-first audit and acceptance scenarios.
+The visual language follows the provided light dashboard references: pale mint/off-white surfaces, compact sans type, white cards, restrained pastel accents, and minimal borders. The graph canvas prioritizes branch labels, typed fields, precise selection, and visible validation. Browser/device visual QA has not yet been performed; no screenshot or browser-pass claim is made.
+
+## Evaluation semantics
+
+Graphs use one `start` node, `condition` nodes with `true` and `false` flow outputs, and terminal `outcome` nodes. Every condition requires one edge on each branch. Connections must use declared output and input ports. Values are type checked without string-to-number coercion. Optional missing values are treated as `null`; a comparison against an absent optional value follows the `false` branch. Dates use strict `YYYY-MM-DD` values and UTC calendar comparisons. Evaluation follows edges, never canvas coordinates.
+
+## Next gates
+
+1. Run pointer and keyboard flows in a real browser at desktop, tablet, and mobile widths; inspect saved/reopened node positions and connections.
+2. Add explicit undo/redo, delete confirmation, autosave/retry states, import/export, and stronger schema migration handling.
+3. Decide and implement authentication, durable shared persistence, audit events, immutable published versions, and authorization before any hosted multi-user release.
+4. Add API abuse limits and cross-process locking before treating the local server as a shared backend.
 
 ## License
 

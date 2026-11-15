@@ -5,6 +5,8 @@
 secrets/
 *.pem
 *.key
+/data/
+*.tmp
 
 # Operating-system metadata
 .DS_Store
