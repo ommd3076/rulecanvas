@@ -7,6 +7,7 @@ const toast = document.querySelector('#toast');
 const state = {
   projects: [], project: null, ruleset: null, graph: null, revision: 0,
   view: 'dashboard', selectedNodeId: null, selectedEdgeId: null, dirty: false, connectionSource: null,
+  recovered: false,
   connectionPointer: null, drag: null, zoom: 1, offset: { x: 0, y: 0 },
   testInput: {}, result: null, errors: [], saveState: 'saved',
   history: createHistory(),
@@ -310,7 +311,7 @@ function shell(content, active = 'projects') {
       </nav>
       <div class="sidebar-foot"><span class="avatar">R</span><span class="profile-text"><strong>RuleCanvas</strong><small>Local workspace</small></span><span class="more-dots">•••</span></div>
     </aside>
-    <main class="main-area"><header class="topbar"><div class="breadcrumbs"><span>Workspace</span><span class="crumb-divider">/</span><strong>${state.view === 'dashboard' ? 'Projects' : escapeHtml(state.project?.name)}</strong></div><div class="topbar-actions"><span class="local-badge"><i></i> Local data</span><button class="icon-button" aria-label="Help" title="Help" data-action="help">?</button><span class="avatar avatar-small">R</span></div></header>${content}</main>
+    <main class="main-area"><header class="topbar"><div class="breadcrumbs"><span>Workspace</span><span class="crumb-divider">/</span><strong>${state.view === 'dashboard' ? 'Projects' : escapeHtml(state.project?.name)}</strong></div><div class="topbar-actions"><span class="local-badge"><i></i> Local data</span><button class="icon-button" aria-label="Help" title="Help" data-action="help">?</button><span class="avatar avatar-small">R</span></div></header>${state.recovered ? '<div class="recovery-banner" role="alert"><strong>Previous local checkpoint loaded.</strong> The latest saved change may be missing. The damaged file is preserved beside the data file; create or save a project to repair it.</div>' : ''}${content}</main>
   </div>`;
 }
 
@@ -706,6 +707,7 @@ async function saveDraft() {
     state.graph = structuredClone(data.ruleset.graph);
     state.revision = data.ruleset.revision;
     state.dirty = false; state.saveState = 'saved';
+    state.recovered = false;
     state.project = (await api(`/api/projects/${encodeURIComponent(state.project.id)}`)).project;
     showToast('Draft saved to this workspace.', 'success'); render();
   } catch (error) {
@@ -804,18 +806,22 @@ app.addEventListener('click', async (event) => {
       const name = await askForName('project');
       if (!name) return;
       const data = await api('/api/projects', { method: 'POST', body: JSON.stringify({ name }) });
+      state.recovered = false;
       showToast('Project created.', 'success'); await openProject(data.project.id); await loadProjects();
     } else if (action === 'new-ruleset') {
       const name = await askForName('ruleset');
       if (!name) return;
       const data = await api(`/api/projects/${encodeURIComponent(state.project.id)}/rulesets`, { method: 'POST', body: JSON.stringify({ name }) });
+      state.recovered = false;
       await openRuleset(data.ruleset.id);
     } else if (action === 'back-project') await openProject(state.project.id);
     else if (action === 'save') await saveDraft();
     else if (action === 'create-version') {
       if (state.dirty) { showToast('Save the draft before creating a version.', 'error'); return; }
       const data = await api(`/api/rulesets/${encodeURIComponent(state.ruleset.id)}/versions`, { method: 'POST', body: JSON.stringify({ expectedRevision: state.revision }) });
+      state.recovered = false;
       showToast(`Saved immutable version ${data.version.versionNumber}.`, 'success');
+      render();
     } else if (action === 'versions') await showVersionHistory();
     else if (action === 'activity') await showProjectActivity();
     else if (action === 'undo') applyHistory('undo');
@@ -994,7 +1000,7 @@ async function boot() {
     await loadProjects();
     render();
     api('/api/health').then(({ recovered }) => {
-      if (recovered) showToast('Loaded the previous local checkpoint. The latest saved change may be missing; create or save a project to repair the workspace file.', 'error');
+      if (recovered) { state.recovered = true; render(); }
     }).catch(() => {});
   }
   catch (error) { app.innerHTML = `<main class="fatal-state"><h1>Workspace unavailable</h1><p>${escapeHtml(error.message)}</p><button class="button button-secondary" data-action="reload">Try again</button></main>`; }

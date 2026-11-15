@@ -58,6 +58,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .more-dots { margin-left: auto; color: #9aa59f; font-size: 14px; letter-spacing: 2px; }
 .main-area { min-width: 0; }
 .topbar { height: 72px; padding: 0 34px; display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,.62); border-bottom: 1px solid #e8efec; }
+.recovery-banner { padding: 11px 22px; border-bottom: 1px solid #eedab5; color: #725627; background: #fff8e7; font-size: 11px; line-height: 1.5; }
+.recovery-banner strong { margin-right: 5px; }
 .breadcrumbs { display: flex; align-items: center; gap: 10px; color: #8a9691; font-size: 12px; }
 .breadcrumbs strong { color: #495650; font-weight: 640; }
 .crumb-divider { color: #c3cdc8; }
