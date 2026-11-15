@@ -364,7 +364,7 @@ function renderCanvasMarkup() {
     const portOffset = edge.fromPort === 'true' ? 65 : edge.fromPort === 'false' ? 112 : 83;
     const labelY = source ? safeSvgNumber(Number(source.y) + portOffset) : '0';
     const label = edge.fromPort === 'true' ? 'Yes' : edge.fromPort === 'false' ? 'No' : '';
-    return `<g class="edge-group${state.selectedEdgeId === edge.id ? ' is-selected' : ''}" data-edge="${escapeHtml(edge.id)}" tabindex="0" role="button" aria-label="Connection from ${escapeHtml(source ? getNodeLabel(source) : 'missing node')}; select to remove"><path class="edge-path" d="${escapeHtml(edgePath(edge))}" marker-end="url(#arrow)"/><text class="edge-label" x="${escapeHtml(labelX)}" y="${escapeHtml(labelY)}">${label}</text></g>`;
+    return `<g class="edge-group${state.selectedEdgeId === edge.id ? ' is-selected' : ''}" data-edge="${escapeHtml(edge.id)}" tabindex="0" role="button" aria-pressed="${state.selectedEdgeId === edge.id}" aria-label="Connection from ${escapeHtml(source ? getNodeLabel(source) : 'missing node')}; select to remove"><path class="edge-path" d="${escapeHtml(edgePath(edge))}" marker-end="url(#arrow)"/><text class="edge-label" x="${escapeHtml(labelX)}" y="${escapeHtml(labelY)}">${label}</text></g>`;
   }).join('');
   const nodeSvg = state.graph.nodes.map((node) => {
     const selected = state.selectedNodeId === node.id;
@@ -648,6 +648,16 @@ function attachCanvasEvents() {
   });
   svg.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' || event.key === ' ') {
+      const edge = event.target.closest('[data-edge]');
+      if (edge) {
+        event.preventDefault();
+        state.selectedEdgeId = edge.dataset.edge;
+        state.selectedNodeId = null;
+        renderCanvas(); renderInspectorPanel();
+        const deleteButton = document.querySelector('#delete-edge-button');
+        if (deleteButton) deleteButton.disabled = false;
+        return;
+      }
       const port = event.target.closest('[data-port-kind]');
       if (!port) return;
       event.preventDefault();
