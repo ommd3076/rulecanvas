@@ -1,6 +1,7 @@
 import { escapeHtml, renderTestTextInput } from './render-utils.js';
 import { createHistory, restoreSnapshot, saveSnapshot } from './history.js';
 import { removeConnection } from './graph-editing.js';
+import { serializeConflictCopy } from './conflict-copy.js';
 
 const app = document.querySelector('#app');
 const toast = document.querySelector('#toast');
@@ -716,7 +717,7 @@ async function saveDraft() {
     if (error.status === 409) {
       showToast('This draft changed elsewhere. Reload it before continuing.', 'error');
       const status = document.querySelector('#save-status');
-      if (status) status.innerHTML = 'Revision conflict <button class="text-button" data-action="reload-ruleset">Reload</button>';
+      if (status) status.innerHTML = 'Revision conflict · local draft retained <button class="text-button" data-action="download-conflict">Download local copy</button><button class="text-button" data-action="reload-ruleset">Reload server copy</button>';
     } else showToast(`Could not save: ${error.message}`, 'error');
   }
 }
@@ -835,6 +836,7 @@ app.addEventListener('click', async (event) => {
     else if (action === 'zoom-out') { state.zoom = Math.max(0.45, state.zoom / 1.12); renderCanvas(); updateZoomLabel(); }
     else if (action === 'fit') { state.zoom = 0.8; state.offset = { x: 0, y: 0 }; renderCanvas(); updateZoomLabel(); }
     else if (action === 'reload-ruleset') await openRuleset(state.ruleset.id);
+    else if (action === 'download-conflict') downloadConflictCopy();
     else if (action === 'reload') window.location.reload();
     else if (action === 'help') showToast('Create nodes, connect output ports to input ports, then save and validate the graph.', 'info');
   } catch (error) { showToast(error.message, 'error'); }
@@ -1005,5 +1007,27 @@ async function boot() {
   }
   catch (error) { app.innerHTML = `<main class="fatal-state"><h1>Workspace unavailable</h1><p>${escapeHtml(error.message)}</p><button class="button button-secondary" data-action="reload">Try again</button></main>`; }
 }
+
+function downloadConflictCopy() {
+  const json = serializeConflictCopy({
+    rulesetId: state.ruleset.id,
+    name: document.querySelector('#ruleset-name')?.value ?? state.ruleset.name,
+    expectedRevision: state.revision,
+    graph: state.graph,
+  });
+  const objectUrl = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+  const link = document.createElement('a');
+  link.href = objectUrl;
+  link.download = `rulecanvas-conflict-${state.ruleset.id}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+  showToast('Downloaded the unsaved local draft copy.', 'success');
+}
+
+window.addEventListener('beforeunload', (event) => {
+  if (!state.dirty) return;
+  event.preventDefault();
+  event.returnValue = '';
+});
 
 boot();

@@ -73,16 +73,21 @@ test('rejects stale draft writes instead of silently overwriting a newer revisio
   const base = await startServer(t);
   const project = (await jsonRequest(base, '/api/projects', { method: 'POST', body: JSON.stringify({ name: 'Concurrent edits' }) })).body.project;
   const ruleset = (await jsonRequest(base, `/api/projects/${project.id}/rulesets`, { method: 'POST', body: JSON.stringify({ name: 'Draft' }) })).body.ruleset;
-  const body = JSON.stringify({ expectedRevision: 1, name: 'Draft', graph: validGraph() });
+  const firstGraph = validGraph();
+  const secondGraph = validGraph();
+  firstGraph.nodes.find((node) => node.id === 'score-check').value = 8;
+  secondGraph.nodes.find((node) => node.id === 'score-check').value = 9;
   const [one, two] = await Promise.all([
-    jsonRequest(base, `/api/rulesets/${ruleset.id}`, { method: 'PUT', body }),
-    jsonRequest(base, `/api/rulesets/${ruleset.id}`, { method: 'PUT', body }),
+    jsonRequest(base, `/api/rulesets/${ruleset.id}`, { method: 'PUT', body: JSON.stringify({ expectedRevision: 1, name: 'Draft', graph: firstGraph }) }),
+    jsonRequest(base, `/api/rulesets/${ruleset.id}`, { method: 'PUT', body: JSON.stringify({ expectedRevision: 1, name: 'Draft', graph: secondGraph }) }),
   ]);
   assert.deepEqual([one.status, two.status].sort(), [200, 409]);
   const winner = one.status === 200 ? one : two;
   const conflict = one.status === 409 ? one : two;
   assert.equal(winner.body.ruleset.revision, 2);
   assert.equal(conflict.body.error.code, 'ruleset.conflict');
+  const persisted = await jsonRequest(base, `/api/rulesets/${ruleset.id}`);
+  assert.deepEqual(persisted.body.ruleset.graph, winner.body.ruleset.graph, 'losing request must not overwrite winning graph');
 });
 
 test('creates validated immutable versions with replay and local audit evidence', async (t) => {
@@ -142,12 +147,15 @@ test('serves app assets from the public directory and blocks traversal', async (
   const appScript = await fetch(`${base}/app.js`);
   const historyModule = await fetch(`${base}/history.js`);
   const graphEditingModule = await fetch(`${base}/graph-editing.js`);
+  const conflictCopyModule = await fetch(`${base}/conflict-copy.js`);
   assert.equal(appScript.status, 200);
   assert.match(appScript.headers.get('content-type'), /javascript/);
   assert.equal(historyModule.status, 200);
   assert.match(historyModule.headers.get('content-type'), /javascript/);
   assert.equal(graphEditingModule.status, 200);
   assert.match(graphEditingModule.headers.get('content-type'), /javascript/);
+  assert.equal(conflictCopyModule.status, 200);
+  assert.match(conflictCopyModule.headers.get('content-type'), /javascript/);
   const traversal = await fetch(`${base}/%2e%2e/src/server.mjs`);
   assert.equal(traversal.status, 404);
 });
