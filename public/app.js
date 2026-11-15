@@ -651,11 +651,7 @@ function attachCanvasEvents() {
       const edge = event.target.closest('[data-edge]');
       if (edge) {
         event.preventDefault();
-        state.selectedEdgeId = edge.dataset.edge;
-        state.selectedNodeId = null;
-        renderCanvas(); renderInspectorPanel();
-        const deleteButton = document.querySelector('#delete-edge-button');
-        if (deleteButton) deleteButton.disabled = false;
+        selectEdge(edge.dataset.edge);
         return;
       }
       const port = event.target.closest('[data-port-kind]');
@@ -769,6 +765,17 @@ function deleteSelectedEdge() {
   state.selectedEdgeId = null;
   checkpointSnapshot(previous);
   markDirty(); render();
+}
+
+function selectEdge(edgeId) {
+  state.selectedEdgeId = edgeId;
+  state.selectedNodeId = null;
+  renderCanvas();
+  renderInspectorPanel();
+  const selected = [...document.querySelectorAll('#graph-canvas [data-edge]')].find((item) => item.dataset.edge === edgeId);
+  selected?.focus({ preventScroll: true });
+  const deleteButton = document.querySelector('#delete-edge-button');
+  if (deleteButton) deleteButton.disabled = false;
 }
 
 app.addEventListener('click', async (event) => {
@@ -948,11 +955,7 @@ app.addEventListener('change', (event) => {
 app.addEventListener('click', (event) => {
   const edge = event.target.closest('[data-edge]');
   if (edge) {
-    state.selectedEdgeId = edge.dataset.edge;
-    state.selectedNodeId = null;
-    renderCanvas(); renderInspectorPanel();
-    const deleteButton = document.querySelector('#delete-edge-button');
-    if (deleteButton) deleteButton.disabled = false;
+    selectEdge(edge.dataset.edge);
     return;
   }
   const node = event.target.closest('[data-node]');
