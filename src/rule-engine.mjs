@@ -1,4 +1,8 @@
 const FIELD_TYPES = new Set(['string', 'number', 'boolean', 'date', 'enum']);
+const LOGIC_OPERATORS = new Set(['and', 'or']);
+const MAX_LOGIC_DEPTH = 16;
+const MAX_LOGIC_TERMS = 128;
+const MAX_TOTAL_LOGIC_TERMS = 2048;
 const COMPARISONS = {
   string: new Set(['eq', 'neq']),
   enum: new Set(['eq', 'neq']),
@@ -77,14 +81,48 @@ function validateCondition(node, fieldById) {
   return errors;
 }
 
+function validateLogicGroup(operator, terms, fieldById, nodeId, path = '', depth = 0, budget = { count: 0, reported: false }) {
+  const errors = [];
+  if (depth > MAX_LOGIC_DEPTH) return [fail('group.depth', `Logic groups may be nested at most ${MAX_LOGIC_DEPTH} levels.`, { nodeId, termPath: path })];
+  if (!LOGIC_OPERATORS.has(operator)) errors.push(fail('group.operator', 'Logic group operator must be AND or OR.', { nodeId, termPath: path }));
+  if (!Array.isArray(terms) || terms.length < 2 || terms.length > MAX_LOGIC_TERMS) {
+    errors.push(fail('group.terms', `Each logic group needs between 2 and ${MAX_LOGIC_TERMS} terms.`, { nodeId, termPath: path }));
+    return errors;
+  }
+  for (let index = 0; index < terms.length; index++) {
+    budget.count++;
+    if (budget.count > MAX_TOTAL_LOGIC_TERMS) {
+      if (!budget.reported) errors.push(fail('group.size', `Logic expressions may contain at most ${MAX_TOTAL_LOGIC_TERMS} terms.`, { nodeId, termPath: path }));
+      budget.reported = true;
+      break;
+    }
+    const term = terms[index];
+    const termPath = path ? `${path}.${index}` : String(index);
+    if (!term || typeof term !== 'object' || Array.isArray(term)) {
+      errors.push(fail('group.term.invalid', 'Logic terms must be condition or nested group objects.', { nodeId, termPath }));
+      continue;
+    }
+    if (term.type === 'group') {
+      errors.push(...validateLogicGroup(term.operator, term.terms, fieldById, nodeId, termPath, depth + 1, budget));
+      continue;
+    }
+    if (term.type !== 'condition') {
+      errors.push(fail('group.term.type', 'Logic terms must be conditions or nested groups.', { nodeId, termPath }));
+      continue;
+    }
+    errors.push(...validateCondition({ ...term, id: nodeId }, fieldById).map((error) => ({ ...error, termPath })));
+  }
+  return errors;
+}
+
 function sourcePortTypes(node) {
   if (node.type === 'start') return { next: 'flow' };
-  if (node.type === 'condition') return { true: 'flow:yes', false: 'flow:no' };
+  if (node.type === 'condition' || node.type === 'group') return { true: 'flow:yes', false: 'flow:no' };
   return {};
 }
 
 function targetPortTypes(node) {
-  if (node.type === 'condition' || node.type === 'outcome') return { in: ['flow', 'flow:yes', 'flow:no'] };
+  if (node.type === 'condition' || node.type === 'group' || node.type === 'outcome') return { in: ['flow', 'flow:yes', 'flow:no'] };
   return {};
 }
 
@@ -111,7 +149,7 @@ export function validateGraph(graph) {
     }
     if (nodeById.has(node.id)) errors.push(fail('node.duplicate', 'Node IDs must be unique.', { nodeId: node.id }));
     nodeById.set(node.id, node);
-    if (!['start', 'condition', 'outcome'].includes(node.type)) {
+    if (!['start', 'condition', 'group', 'outcome'].includes(node.type)) {
       errors.push(fail('node.type', `Unsupported node type: ${String(node.type)}.`, { nodeId: node.id }));
     }
     if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) {
@@ -120,6 +158,10 @@ export function validateGraph(graph) {
     if (node.type === 'condition') {
       const fields = Array.isArray(graph.schema) ? graph.schema.filter((field) => field && typeof field.id === 'string') : [];
       errors.push(...validateCondition(node, new Map(fields.map((field) => [field.id, field]))));
+    }
+    if (node.type === 'group') {
+      const fields = Array.isArray(graph.schema) ? graph.schema.filter((field) => field && typeof field.id === 'string') : [];
+      errors.push(...validateLogicGroup(node.operator, node.terms, new Map(fields.map((field) => [field.id, field])), node.id));
     }
     if (node.type === 'outcome' && (!node.label || typeof node.label !== 'string')) {
       errors.push(fail('node.outcome.label', 'Outcome nodes need a name.', { nodeId: node.id }));
@@ -163,15 +205,17 @@ export function validateGraph(graph) {
     if (node.type === 'start' && (outs.length !== 1 || ins.length !== 0 || outs[0]?.fromPort !== 'next')) {
       errors.push(fail('graph.start.connections', 'Start must have one next connection and no incoming connections.', { nodeId: node.id }));
     }
-    if (node.type === 'condition') {
-      if (ins.length !== 1) errors.push(fail('graph.condition.input', 'Each condition needs exactly one incoming connection.', { nodeId: node.id }));
+    if (node.type === 'condition' || node.type === 'group') {
+      const prefix = node.type === 'group' ? 'graph.group' : 'graph.condition';
+      const label = node.type === 'group' ? 'Logic group' : 'Condition';
+      if (ins.length !== 1) errors.push(fail(`${prefix}.input`, `Each ${label.toLowerCase()} needs exactly one incoming connection.`, { nodeId: node.id }));
       for (const port of ['true', 'false']) {
         if (outs.filter((edge) => edge.fromPort === port).length !== 1) {
-          errors.push(fail('graph.condition.branch', `Each condition needs exactly one ${port} branch.`, { nodeId: node.id }));
+          errors.push(fail(`${prefix}.branch`, `Each ${label.toLowerCase()} needs exactly one ${port} branch.`, { nodeId: node.id }));
         }
       }
       if (outs.some((edge) => !['true', 'false'].includes(edge.fromPort))) {
-        errors.push(fail('graph.condition.port', 'Condition outputs must use true or false ports.', { nodeId: node.id }));
+        errors.push(fail(`${prefix}.port`, `${label} outputs must use true or false ports.`, { nodeId: node.id }));
       }
     }
     if (node.type === 'outcome' && (ins.length !== 1 || outs.length !== 0)) {
@@ -275,6 +319,21 @@ function compare(actual, operator, expected, type) {
   }
 }
 
+function evaluateLogicGroup(operator, terms, input, schema) {
+  const evaluations = terms.map((term) => {
+    if (term.type === 'group') {
+      const nested = evaluateLogicGroup(term.operator, term.terms, input, schema);
+      return { type: 'group', operator: term.operator, matched: nested.matched, terms: nested.terms };
+    }
+    const field = schema.get(term.fieldId);
+    const actual = input[field.name] ?? null;
+    const matched = actual !== null && compare(actual, term.operator, term.value, field.type);
+    return { type: 'condition', field: field.name, operator: term.operator, expected: term.value, actual, matched };
+  });
+  const matched = operator === 'and' ? evaluations.every((term) => term.matched) : evaluations.some((term) => term.matched);
+  return { matched, terms: evaluations };
+}
+
 export function evaluateGraph(graph, input) {
   const graphResult = validateGraph(graph);
   if (!graphResult.valid) return { ok: false, errors: graphResult.errors };
@@ -308,6 +367,14 @@ export function evaluateGraph(graph, input) {
         actual,
         branch,
       });
+      const edge = edges.find((item) => item.from === current.id && item.fromPort === branch);
+      current = nodes.get(edge.to);
+      continue;
+    }
+    if (current.type === 'group') {
+      const evaluation = evaluateLogicGroup(current.operator, current.terms, input, schema);
+      const branch = evaluation.matched ? 'true' : 'false';
+      trace.push({ nodeId: current.id, kind: 'group', operator: current.operator, terms: evaluation.terms, branch });
       const edge = edges.find((item) => item.from === current.id && item.fromPort === branch);
       current = nodes.get(edge.to);
       continue;

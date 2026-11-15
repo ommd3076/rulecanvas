@@ -3,6 +3,33 @@ import assert from 'node:assert/strict';
 import { evaluateGraph, validateGraph } from '../src/rule-engine.mjs';
 import { validGraph } from './fixtures.mjs';
 
+function logicGraph() {
+  return {
+    schema: [
+      { id: 'score', name: 'score', type: 'number', required: true },
+      { id: 'tier', name: 'tier', type: 'enum', options: ['priority', 'standard'], required: false },
+      { id: 'backlogs', name: 'backlogs', type: 'number', required: true },
+    ],
+    nodes: [
+      { id: 'start', type: 'start', x: 0, y: 0 },
+      { id: 'eligibility', type: 'group', x: 240, y: 0, operator: 'and', terms: [
+        { type: 'group', operator: 'or', terms: [
+          { type: 'condition', fieldId: 'score', operator: 'gte', value: 8 },
+          { type: 'condition', fieldId: 'tier', operator: 'eq', value: 'priority' },
+        ] },
+        { type: 'condition', fieldId: 'backlogs', operator: 'eq', value: 0 },
+      ] },
+      { id: 'eligible', type: 'outcome', x: 560, y: 0, label: 'Eligible', result: true },
+      { id: 'review', type: 'outcome', x: 560, y: 220, label: 'Review', result: false },
+    ],
+    edges: [
+      { id: 'entry', from: 'start', fromPort: 'next', to: 'eligibility', toPort: 'in' },
+      { id: 'pass', from: 'eligibility', fromPort: 'true', to: 'eligible', toPort: 'in' },
+      { id: 'fail', from: 'eligibility', fromPort: 'false', to: 'review', toPort: 'in' },
+    ],
+  };
+}
+
 test('validates and deterministically evaluates a typed graph with an ordered trace', () => {
   const graph = validGraph();
   assert.deepEqual(validateGraph(graph), { valid: true, errors: [] });
@@ -135,4 +162,49 @@ test('enforces declared enum choices and validates calendar dates', () => {
   };
   assert.equal(evaluateGraph(dateGraph, { startsOn: '2026-02-30' }).ok, false);
   assert.equal(evaluateGraph(dateGraph, { startsOn: '2026-11-01' }).result, true);
+});
+
+test('evaluates explicit nested AND/OR groups with group-first precedence and stable trace', () => {
+  const graph = logicGraph();
+  assert.deepEqual(validateGraph(graph), { valid: true, errors: [] });
+  const scoreOnly = evaluateGraph(graph, { score: 8, backlogs: 0 });
+  const tierOnly = evaluateGraph(graph, { score: 7.9, tier: 'priority', backlogs: 0 });
+  const missingOptional = evaluateGraph(graph, { score: 7.9, backlogs: 0 });
+  const wrongBacklogs = evaluateGraph(graph, { score: 8, backlogs: 1 });
+
+  assert.equal(scoreOnly.result, true);
+  assert.equal(tierOnly.result, true);
+  assert.equal(missingOptional.result, false);
+  assert.equal(wrongBacklogs.result, false);
+  assert.deepEqual(evaluateGraph(graph, { score: 8, backlogs: 0 }), scoreOnly);
+  assert.deepEqual(scoreOnly.trace.map((item) => item.kind), ['start', 'group', 'outcome']);
+  assert.equal(scoreOnly.trace[1].operator, 'and');
+  assert.equal(scoreOnly.trace[1].terms[0].operator, 'or');
+  assert.deepEqual(scoreOnly.trace[1].terms.map((term) => term.matched), [true, true]);
+
+  graph.nodes.find((node) => node.id === 'eligibility').x += 300;
+  assert.deepEqual(evaluateGraph(graph, { score: 8, backlogs: 0 }), scoreOnly);
+});
+
+test('rejects malformed, untyped, oversized and deeply nested logical groups', () => {
+  const graph = logicGraph();
+  const group = graph.nodes.find((node) => node.id === 'eligibility');
+  group.operator = 'xor';
+  group.terms[0].terms[1].value = 1;
+  const invalid = validateGraph(graph);
+  assert.ok(invalid.errors.some((error) => error.code === 'group.operator'));
+  assert.ok(invalid.errors.some((error) => error.code === 'node.value.type' || error.code === 'node.value.enum'));
+
+  const tooFew = logicGraph();
+  tooFew.nodes.find((node) => node.id === 'eligibility').terms = [{ type: 'condition', fieldId: 'score', operator: 'gte', value: 8 }];
+  assert.ok(validateGraph(tooFew).errors.some((error) => error.code === 'group.terms'));
+
+  const tooDeep = logicGraph();
+  const root = tooDeep.nodes.find((node) => node.id === 'eligibility');
+  let nested = root.terms[0];
+  for (let depth = 0; depth < 20; depth++) {
+    nested.terms = [{ type: 'condition', fieldId: 'score', operator: 'gte', value: 8 }, { type: 'group', operator: 'and', terms: [] }];
+    nested = nested.terms[1];
+  }
+  assert.ok(validateGraph(tooDeep).errors.some((error) => error.code === 'group.depth' || error.code === 'group.terms'));
 });
