@@ -1,0 +1,12 @@
+# Local secrets and machine-specific credentials
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+desktop.ini
