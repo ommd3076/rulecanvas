@@ -116,13 +116,21 @@ test('creates validated immutable versions with replay and local audit evidence'
   assert.equal(savedAgain.status, 200);
   const oldVersion = await jsonRequest(base, `/api/rulesets/${ruleset.id}/versions/${version.id}`);
   assert.deepEqual(oldVersion.body.version.graph, validGraph());
+  const oldReplay = await jsonRequest(base, `/api/rulesets/${ruleset.id}/versions/${version.id}/evaluate`, { method: 'POST', body: JSON.stringify({ input: { score: 8, tier: 'priority' } }) });
+  assert.deepEqual(oldReplay.body.result, { decision: 'eligible' });
+  const draftReplay = await jsonRequest(base, `/api/rulesets/${ruleset.id}/evaluate`, { method: 'POST', body: JSON.stringify({ input: { score: 8, tier: 'priority' } }) });
+  assert.deepEqual(draftReplay.body.result, { decision: 'edited draft' });
+  const secondVersion = await jsonRequest(base, `/api/rulesets/${ruleset.id}/versions`, { method: 'POST', body: JSON.stringify({ expectedRevision: 3 }) });
+  assert.equal(secondVersion.status, 201);
+  assert.equal(secondVersion.body.version.versionNumber, 2);
   const list = await jsonRequest(base, `/api/rulesets/${ruleset.id}/versions`);
-  assert.equal(list.body.versions.length, 1);
+  assert.equal(list.body.versions.length, 2);
+  assert.deepEqual(list.body.versions.map((item) => item.versionNumber), [2, 1]);
   assert.equal('graph' in list.body.versions[0], false);
 
   const audit = await jsonRequest(base, `/api/projects/${project.id}/audit`);
-  assert.deepEqual(audit.body.events.map((event) => event.type).sort(), ['project.created', 'ruleset.created', 'ruleset.draft.saved', 'ruleset.draft.saved', 'ruleset.version.created'].sort());
-  assert.equal(audit.body.events.find((event) => event.type === 'ruleset.version.created').details.graphHash, version.graphHash);
+  assert.deepEqual(audit.body.events.map((event) => event.type).sort(), ['project.created', 'ruleset.created', 'ruleset.draft.saved', 'ruleset.draft.saved', 'ruleset.version.created', 'ruleset.version.created'].sort());
+  assert.ok(audit.body.events.some((event) => event.type === 'ruleset.version.created' && event.details.graphHash === version.graphHash));
 });
 
 test('refuses invalid or stale version snapshots', async (t) => {
