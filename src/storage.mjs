@@ -3,6 +3,8 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { createStarterGraph, validateGraph } from './rule-engine.mjs';
 
+const STORE_SCHEMA_VERSION = 1;
+
 export class StoreError extends Error {
   constructor(message, status = 400, code = 'store.error', details = undefined) {
     super(message);
@@ -33,12 +35,19 @@ function parseStoreContents(contents) {
   if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
     throw new StoreError('Local workspace data has an invalid shape.', 503, 'storage.corrupt');
   }
-  for (const key of ['projects', 'rulesets', 'versions', 'auditEvents']) {
-    if (stored[key] !== undefined && !Array.isArray(stored[key])) {
+  const sourceVersion = Object.hasOwn(stored, 'schemaVersion') ? stored.schemaVersion : 0;
+  if (!Number.isInteger(sourceVersion) || sourceVersion < 0 || sourceVersion > STORE_SCHEMA_VERSION) {
+    throw new StoreError(`Local workspace schema version ${String(sourceVersion)} is not supported. The file was left untouched.`, 503, 'storage.version');
+  }
+  const keys = ['projects', 'rulesets', 'versions', 'auditEvents'];
+  const requiredKeys = sourceVersion === 0 ? ['projects', 'rulesets'] : keys;
+  for (const key of keys) {
+    if (requiredKeys.includes(key) ? !Array.isArray(stored[key]) : stored[key] !== undefined && !Array.isArray(stored[key])) {
       throw new StoreError(`Local workspace ${key} data has an invalid shape.`, 503, 'storage.corrupt');
     }
   }
   return {
+    schemaVersion: STORE_SCHEMA_VERSION,
     projects: stored.projects ?? [],
     rulesets: stored.rulesets ?? [],
     versions: stored.versions ?? [],
@@ -71,7 +80,7 @@ export class JsonStore {
     try {
       contents = await readFile(this.#file, 'utf8');
     } catch (error) {
-      if (error.code === 'ENOENT') return { projects: [], rulesets: [], versions: [], auditEvents: [] };
+      if (error.code === 'ENOENT') return { schemaVersion: STORE_SCHEMA_VERSION, projects: [], rulesets: [], versions: [], auditEvents: [] };
       throw error;
     }
     try {

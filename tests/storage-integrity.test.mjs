@@ -66,3 +66,39 @@ test('does not overwrite an unreadable store when no recovery checkpoint exists'
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('migrates the known legacy store shape on the next successful write', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'rulecanvas-migration-'));
+  const file = join(directory, 'store.json');
+  const legacy = {
+    projects: [{ id: 'legacy-project', slug: 'legacy-project', name: 'Legacy project', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }],
+    rulesets: [],
+  };
+  try {
+    await writeFile(file, JSON.stringify(legacy));
+    const store = new JsonStore(file);
+    assert.deepEqual((await store.listProjects()).map((project) => project.name), ['Legacy project']);
+    await store.createProject('New project');
+    const migrated = JSON.parse(await readFile(file, 'utf8'));
+    assert.equal(migrated.schemaVersion, 1);
+    assert.deepEqual(migrated.projects.map((project) => project.name), ['Legacy project', 'New project']);
+    assert.deepEqual(migrated.versions, []);
+    assert.deepEqual(migrated.auditEvents.map((event) => event.type), ['project.created']);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('does not downgrade or overwrite a future store schema version', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'rulecanvas-future-schema-'));
+  const file = join(directory, 'store.json');
+  const future = JSON.stringify({ schemaVersion: 99, projects: [], rulesets: [], versions: [], auditEvents: [] });
+  try {
+    await writeFile(file, future);
+    const store = new JsonStore(file);
+    await assert.rejects(store.createProject('Must not downgrade'), (error) => error.code === 'storage.version' && error.status === 503);
+    assert.equal(await readFile(file, 'utf8'), future);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
