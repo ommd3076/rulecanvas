@@ -341,6 +341,7 @@ function renderProject() {
 function getNodeLabel(node) {
   if (node.type === 'start') return 'Start';
   if (node.type === 'outcome') return node.label || 'Outcome';
+  if (node.type === 'group') return `${String(node.operator || 'and').toUpperCase()} group`;
   const field = state.graph.schema.find((item) => item.id === node.fieldId);
   return field?.name || 'Condition';
 }
@@ -373,25 +374,28 @@ function renderCanvasMarkup() {
   }).join('');
   const nodeSvg = state.graph.nodes.map((node) => {
     const selected = state.selectedNodeId === node.id;
+    const isBranch = node.type === 'condition' || node.type === 'group';
     const isCondition = node.type === 'condition';
-    const subtitle = node.type === 'condition'
+    const subtitle = node.type === 'group'
+      ? `${String(node.operator || 'and').toUpperCase()} · ${(node.terms ?? []).length} terms`
+      : node.type === 'condition'
       ? `${escapeHtml(operatorLabels[node.operator] || 'choose operator')} ${escapeHtml(String(node.value ?? 'value'))}`
       : node.type === 'outcome' ? `Result · ${escapeHtml(JSON.stringify(node.result ?? null))}` : 'Entry point';
-    const typeLabel = node.type === 'condition' ? 'CONDITION' : node.type === 'outcome' ? 'OUTCOME' : 'START';
-    const safeType = ['start', 'condition', 'outcome'].includes(node.type) ? node.type : 'unknown';
+    const typeLabel = node.type === 'group' ? 'LOGIC GROUP' : node.type === 'condition' ? 'CONDITION' : node.type === 'outcome' ? 'OUTCOME' : 'START';
+    const safeType = ['start', 'condition', 'group', 'outcome'].includes(node.type) ? node.type : 'unknown';
     const className = `graph-node node-${safeType}${selected ? ' is-selected' : ''}`;
     return `<g class="${className}" data-node="${escapeHtml(node.id)}" transform="translate(${escapeHtml(safeSvgNumber(Number(node.x)))} ${escapeHtml(safeSvgNumber(Number(node.y)))})" tabindex="0" role="group" aria-label="${escapeHtml(typeLabel)}: ${escapeHtml(getNodeLabel(node))}">
       <rect class="node-surface" width="220" height="132" rx="16"/>
       ${node.type !== 'start' ? `<circle class="port port-in" data-port-kind="in" data-node="${escapeHtml(node.id)}" cx="0" cy="66" r="7" tabindex="0" role="button" aria-label="Connect into ${escapeHtml(getNodeLabel(node))}"/>` : ''}
       <rect class="node-accent accent-${safeType}" x="16" y="17" width="26" height="26" rx="8"/>
-      <text class="node-glyph" x="29" y="35" text-anchor="middle">${node.type === 'start' ? '↗' : node.type === 'condition' ? '?' : '✓'}</text>
+      <text class="node-glyph" x="29" y="35" text-anchor="middle">${node.type === 'start' ? '↗' : node.type === 'group' ? (node.operator === 'or' ? '∨' : '∧') : node.type === 'condition' ? '?' : '✓'}</text>
       <text class="node-kind" x="54" y="27">${typeLabel}</text>
       <text class="node-title" x="54" y="47">${escapeHtml(getNodeLabel(node))}</text>
       <line class="node-divider" x1="16" y1="66" x2="204" y2="66"/>
       <text class="node-subtitle" x="16" y="89">${subtitle.length > 29 ? `${subtitle.slice(0, 28)}…` : subtitle}</text>
-      <text class="node-hint" x="16" y="113">${node.type === 'condition' ? escapeHtml(state.graph.schema.find((field) => field.id === node.fieldId)?.type ?? 'input') : node.type === 'outcome' ? 'Terminal result' : 'Connect to a node'}</text>
+      <text class="node-hint" x="16" y="113">${node.type === 'condition' ? escapeHtml(state.graph.schema.find((field) => field.id === node.fieldId)?.type ?? 'input') : node.type === 'group' ? 'Nested logic' : node.type === 'outcome' ? 'Terminal result' : 'Connect to a node'}</text>
       ${node.type === 'start' ? `<circle class="port port-out" data-port-kind="out" data-node="${escapeHtml(node.id)}" data-port="next" cx="220" cy="66" r="7" tabindex="0" role="button" aria-label="Connect from start"/>` : ''}
-      ${isCondition ? `<circle class="port port-out port-yes" data-port-kind="out" data-node="${escapeHtml(node.id)}" data-port="true" cx="220" cy="71" r="7" tabindex="0" role="button" aria-label="Connect true branch from ${escapeHtml(getNodeLabel(node))}"/><circle class="port port-out port-no" data-port-kind="out" data-node="${escapeHtml(node.id)}" data-port="false" cx="220" cy="105" r="7" tabindex="0" role="button" aria-label="Connect false branch from ${escapeHtml(getNodeLabel(node))}"/><text class="branch-label branch-yes" x="231" y="75">Yes</text><text class="branch-label branch-no" x="231" y="109">No</text>` : ''}
+      ${isBranch ? `<circle class="port port-out port-yes" data-port-kind="out" data-node="${escapeHtml(node.id)}" data-port="true" cx="220" cy="71" r="7" tabindex="0" role="button" aria-label="Connect true branch from ${escapeHtml(getNodeLabel(node))}"/><circle class="port port-out port-no" data-port-kind="out" data-node="${escapeHtml(node.id)}" data-port="false" cx="220" cy="105" r="7" tabindex="0" role="button" aria-label="Connect false branch from ${escapeHtml(getNodeLabel(node))}"/><text class="branch-label branch-yes" x="231" y="75">Yes</text><text class="branch-label branch-no" x="231" y="109">No</text>` : ''}
     </g>`;
   }).join('');
   let draftLine = '';
@@ -415,11 +419,110 @@ function renderSchema() {
   </div>`;
 }
 
+function defaultTermValue(field) {
+  if (field?.type === 'number') return 0;
+  if (field?.type === 'boolean') return true;
+  if (field?.type === 'date') return '2026-01-01';
+  if (field?.type === 'enum') return field.options?.[0] ?? '';
+  return '';
+}
+
+function renderGroupTerm(term, path, depth = 0, budget = { remaining: 2048 }) {
+  if (depth > 16) return '<div class="logic-term">Nested logic exceeds the supported depth of 16.</div>';
+  if (budget.remaining <= 0) return '<div class="logic-term">Expression display limit reached; validate the graph for details.</div>';
+  budget.remaining--;
+  if (!term || typeof term !== 'object') return '<div class="logic-term">Invalid logic term.</div>';
+  if (term.type === 'group') {
+    const terms = Array.isArray(term.terms) ? term.terms : [];
+    const children = terms.slice(0, 128).map((child, index) => renderGroupTerm(child, path ? `${path}.${index}` : String(index), depth + 1, budget)).join('');
+    return `<div class="logic-term logic-subgroup"><div class="logic-term-heading"><select class="form-control logic-operator" data-group-path="${path}" data-group-prop="operator" aria-label="Nested group operator"><option value="and" ${term.operator === 'and' ? 'selected' : ''}>All (AND)</option><option value="or" ${term.operator === 'or' ? 'selected' : ''}>Any (OR)</option></select><div class="logic-term-actions"><button class="tiny-remove" data-group-action="add-condition" data-group-path="${path}" aria-label="Add condition to nested group">+</button><button class="tiny-remove" data-group-action="add-group" data-group-path="${path}" aria-label="Add nested group">⊞</button><button class="tiny-remove" data-group-action="remove-term" data-group-path="${path}" aria-label="Remove nested group" ${!groupTermRemovable(path) ? 'disabled' : ''}>×</button></div></div><div class="logic-term-children">${children}${terms.length > 128 ? '<p class="field-hint">This group exceeds the 128-term editor limit.</p>' : ''}</div></div>`;
+  }
+  const field = state.graph.schema.find((item) => item.id === term.fieldId) ?? state.graph.schema[0];
+  const operators = field ? operatorsFor(field.type) : [];
+  const type = field?.type;
+  let valueControl = `<input class="form-control logic-value" data-group-path="${path}" data-group-prop="value" type="${type === 'number' ? 'number' : type === 'date' ? 'date' : 'text'}" value="${escapeHtml(term.value ?? '')}" aria-label="Condition value"/>`;
+  if (type === 'boolean') valueControl = `<select class="form-control logic-value" data-group-path="${path}" data-group-prop="value" aria-label="Condition value"><option value="true" ${term.value === true ? 'selected' : ''}>True</option><option value="false" ${term.value === false ? 'selected' : ''}>False</option></select>`;
+  if (type === 'enum') valueControl = `<select class="form-control logic-value" data-group-path="${path}" data-group-prop="value" aria-label="Condition value">${(field.options ?? []).map((option) => `<option value="${escapeHtml(option)}" ${term.value === option ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('')}</select>`;
+  return `<div class="logic-term logic-leaf"><select class="form-control logic-field" data-group-path="${path}" data-group-prop="fieldId" aria-label="Condition field">${state.graph.schema.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === field?.id ? 'selected' : ''}>${escapeHtml(item.name)} · ${escapeHtml(item.type)}</option>`).join('')}</select><select class="form-control logic-operator" data-group-path="${path}" data-group-prop="operator" aria-label="Condition operator">${operators.map((operator) => `<option value="${operator}" ${term.operator === operator ? 'selected' : ''}>${escapeHtml(operatorLabels[operator])}</option>`).join('')}</select>${valueControl}<button class="tiny-remove" data-group-action="remove-term" data-group-path="${path}" aria-label="Remove condition" ${!groupTermRemovable(path) ? 'disabled' : ''}>×</button></div>`;
+}
+
+function groupPath(path) {
+  const node = state.graph.nodes.find((item) => item.id === state.selectedNodeId);
+  if (!node || node.type !== 'group') return null;
+  const indexes = path.split('.').filter(Boolean).map(Number);
+  const index = indexes.pop();
+  let parent = { terms: node.terms };
+  for (const part of indexes) parent = parent?.terms?.[part];
+  if (!Number.isInteger(index) || !Array.isArray(parent?.terms) || !parent.terms[index]) return null;
+  return { node, parent, index, term: parent.terms[index], root: indexes.length === 0 };
+}
+
+function groupTermRemovable(path) {
+  const target = groupPath(path);
+  return Boolean(target && target.parent.terms.length > 2);
+}
+
+function makeGroupTerm(type = 'condition') {
+  const field = state.graph.schema[0];
+  const leaf = () => ({ type: 'condition', fieldId: field.id, operator: 'eq', value: defaultTermValue(field) });
+  return type === 'group' ? { type: 'group', operator: 'and', terms: [leaf(), leaf()] } : leaf();
+}
+
+function addGroupTerm(action, path = '') {
+  const node = state.graph.nodes.find((item) => item.id === state.selectedNodeId);
+  if (!node || node.type !== 'group') return;
+  if (!state.graph.schema.length) { showToast('Add an input field before adding a group condition.', 'error'); return; }
+  let terms = node.terms;
+  for (const index of path.split('.').filter(Boolean).map(Number)) terms = terms?.[index]?.terms;
+  if (!Array.isArray(terms)) return;
+  if (action === 'remove-term') {
+    const target = groupPath(path);
+    if (!target || target.parent.terms.length <= 2) return;
+    checkpointHistory();
+    target.parent.terms.splice(target.index, 1);
+  } else {
+    checkpointHistory();
+    terms.push(makeGroupTerm(action === 'add-group' ? 'group' : 'condition'));
+  }
+  state.result = null;
+  markDirty(); render();
+}
+
+function updateGroupControl(control) {
+  const path = control.dataset.groupPath;
+  const prop = control.dataset.groupProp;
+  const target = groupPath(path);
+  if (!target || !prop) return;
+  let next = control.value;
+  if (prop === 'fieldId') {
+    const field = state.graph.schema.find((item) => item.id === next);
+    if (!field) return;
+    target.term.fieldId = field.id;
+    target.term.operator = 'eq';
+    target.term.value = defaultTermValue(field);
+  } else if (prop === 'value') {
+    const field = state.graph.schema.find((item) => item.id === target.term.fieldId);
+    if (!field) return;
+    next = parseTypedValue(control, field.type);
+    target.term.value = next;
+  } else target.term[prop] = next;
+  state.result = null;
+  markDirty(); render();
+}
+
+function renderGroupInspector(node) {
+  const terms = Array.isArray(node.terms) ? node.terms : [];
+  const budget = { remaining: 2048 };
+  const rendered = terms.slice(0, 128).map((term, index) => renderGroupTerm(term, String(index), 0, budget)).join('');
+  return `<div class="inspector-content"><div class="selected-label"><span class="kind-dot kind-condition"></span>LOGIC GROUP</div><h3>Combine conditions</h3><p class="inspector-copy">Each group applies its operator to the listed terms. Nest groups to set explicit AND/OR precedence.</p><label class="form-label" for="root-group-operator">Group operator</label><select id="root-group-operator" class="form-control"><option value="and" ${node.operator === 'and' ? 'selected' : ''}>All terms (AND)</option><option value="or" ${node.operator === 'or' ? 'selected' : ''}>Any term (OR)</option></select><div class="logic-group-terms">${rendered}${terms.length > 128 ? '<p class="field-hint">This group exceeds the 128-term editor limit.</p>' : ''}</div><div class="logic-add-actions"><button class="button button-outline" data-group-action="add-condition" data-group-path="">Add condition</button><button class="button button-outline" data-group-action="add-group" data-group-path="">Add nested group</button></div><div class="branch-note"><span class="branch-yes-dot"></span>Yes follows the true port <span class="branch-no-dot"></span>No follows the false port</div><button class="button button-danger-soft button-wide" data-action="delete-node">Delete node</button></div>`;
+}
+
 function renderInspector() {
   const node = state.graph.nodes.find((item) => item.id === state.selectedNodeId);
   if (!node) return `<div class="inspector-empty"><span class="inspector-empty-mark">◇</span><strong>Select a node</strong><p>Choose a node on the canvas to edit its rule or outcome.</p></div>`;
   if (node.type === 'start') return `<div class="inspector-content"><div class="selected-label"><span class="kind-dot kind-start"></span>START NODE</div><h3>Entry point</h3><p class="inspector-copy">Every evaluation begins here. Connect the next port to a condition or outcome node.</p></div>`;
   if (node.type === 'outcome') return `<div class="inspector-content"><div class="selected-label"><span class="kind-dot kind-outcome"></span>OUTCOME NODE</div><label class="form-label" for="outcome-label">Outcome name</label><input id="outcome-label" class="form-control" value="${escapeHtml(node.label)}" maxlength="60"/><label class="form-label" for="outcome-result">Result value (JSON)</label><textarea id="outcome-result" class="form-control code-input" rows="4">${escapeHtml(JSON.stringify(node.result ?? null, null, 2))}</textarea><p class="field-hint">The value returned when a path reaches this outcome.</p><button class="button button-danger-soft button-wide" data-action="delete-node">Delete node</button></div>`;
+  if (node.type === 'group') return renderGroupInspector(node);
   const field = state.graph.schema.find((item) => item.id === node.fieldId);
   const ops = field ? operatorsFor(field.type) : [];
   const value = node.value ?? '';
@@ -428,6 +531,17 @@ function renderInspector() {
   if (field?.type === 'boolean') valueControl = `<select id="condition-value" class="form-control"><option value="true" ${node.value === true ? 'selected' : ''}>True</option><option value="false" ${node.value === false ? 'selected' : ''}>False</option></select>`;
   if (field?.type === 'enum') valueControl = `<select id="condition-value" class="form-control">${(field.options ?? []).map((option) => `<option value="${escapeHtml(option)}" ${node.value === option ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('')}</select>`;
   return `<div class="inspector-content"><div class="selected-label"><span class="kind-dot kind-condition"></span>CONDITION NODE</div><label class="form-label" for="condition-field">Input field</label><select id="condition-field" class="form-control">${state.graph.schema.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === node.fieldId ? 'selected' : ''}>${escapeHtml(item.name)} · ${escapeHtml(item.type)}</option>`).join('')}</select>${field?.type === 'enum' ? `<p class="field-hint">Options: ${escapeHtml((field.options ?? []).join(', '))}</p>` : ''}<label class="form-label" for="condition-operator">Operator</label><select id="condition-operator" class="form-control">${ops.map((operator) => `<option value="${operator}" ${node.operator === operator ? 'selected' : ''}>${operatorLabels[operator]}</option>`).join('')}</select><label class="form-label" for="condition-value">Compare to</label>${valueControl}<div class="branch-note"><span class="branch-yes-dot"></span>Yes follows the true port <span class="branch-no-dot"></span>No follows the false port</div><button class="button button-danger-soft button-wide" data-action="delete-node">Delete node</button></div>`;
+}
+
+function renderGroupTraceTerm(term) {
+  if (term.type === 'group') return `<span class="trace-group">${escapeHtml(term.operator.toUpperCase())} (${term.terms.map(renderGroupTraceTerm).join(' · ')})</span>`;
+  return `${escapeHtml(term.field)} ${escapeHtml(operatorLabels[term.operator] ?? term.operator)} ${escapeHtml(JSON.stringify(term.expected))} ${term.matched ? '✓' : '×'}`;
+}
+
+function renderTraceEntry(entry) {
+  if (entry.kind === 'condition') return `${escapeHtml(entry.field)} ${escapeHtml(operatorLabels[entry.operator])} ${escapeHtml(JSON.stringify(entry.expected))} → <b>${entry.branch === 'true' ? 'Yes' : 'No'}</b>`;
+  if (entry.kind === 'group') return `<span>${escapeHtml(entry.operator.toUpperCase())} (${entry.terms.map(renderGroupTraceTerm).join(' · ')}) → <b>${entry.branch === 'true' ? 'Yes' : 'No'}</b></span>`;
+  return escapeHtml(entry.label);
 }
 
 function renderTestPanel() {
@@ -450,7 +564,7 @@ function renderTestPanel() {
   let result = '';
   if (state.result) {
     result = state.result.ok
-      ? `<div class="evaluation-result is-success"><div class="result-outcome"><span class="result-check">✓</span><span><small>DECISION</small><strong>${escapeHtml(state.result.trace.at(-1)?.label)}</strong></span><code>${escapeHtml(JSON.stringify(state.result.result))}</code></div><ol class="trace-list">${state.result.trace.map((entry) => `<li><span class="trace-index">${escapeHtml(entry.nodeId)}</span><span>${entry.kind === 'condition' ? `${escapeHtml(entry.field)} ${escapeHtml(operatorLabels[entry.operator])} ${escapeHtml(JSON.stringify(entry.expected))} → <b>${entry.branch === 'true' ? 'Yes' : 'No'}</b>` : escapeHtml(entry.label)}</span></li>`).join('')}</ol></div>`
+      ? `<div class="evaluation-result is-success"><div class="result-outcome"><span class="result-check">✓</span><span><small>DECISION</small><strong>${escapeHtml(state.result.trace.at(-1)?.label)}</strong></span><code>${escapeHtml(JSON.stringify(state.result.result))}</code></div><ol class="trace-list">${state.result.trace.map((entry) => `<li><span class="trace-index">${escapeHtml(entry.nodeId)}</span><span>${renderTraceEntry(entry)}</span></li>`).join('')}</ol></div>`
       : `<div class="evaluation-result is-error"><strong>Could not evaluate</strong><ul>${state.result.errors.map((error) => `<li>${escapeHtml(error.message)}</li>`).join('')}</ul></div>`;
   }
   return `<div class="test-panel"><div class="panel-heading"><div><h3>Test a decision</h3><p>Try sample input without changing the saved graph.</p></div></div>${fields.length ? `<div class="test-fields">${inputs}</div>` : `<p class="panel-empty">Add input fields before testing a decision.</p>`}<div class="test-actions"><button class="button button-primary button-wide" data-action="evaluate" ${fields.length ? '' : 'disabled'}>Run test <span>→</span></button><button class="text-button" data-action="clear-test">Clear</button></div>${result}</div>`;
@@ -465,7 +579,7 @@ function renderEditor() {
   app.innerHTML = shell(`<section class="editor-page">
     <div class="editor-toolbar"><div class="editor-title"><button class="back-icon" data-action="back-project" aria-label="Back to project">←</button><div><div class="editor-project-label">${escapeHtml(state.project.name)} <span>›</span></div><input id="ruleset-name" aria-label="Rule set name" value="${escapeHtml(state.ruleset.name)}" maxlength="80"/></div></div><div class="editor-actions"><button id="undo-button" class="history-button" data-action="undo" aria-label="Undo" title="Undo (Ctrl+Z)" disabled>↶</button><button id="redo-button" class="history-button" data-action="redo" aria-label="Redo" title="Redo (Ctrl+Y)" disabled>↷</button><span id="save-status" class="save-status" data-state="${state.dirty ? 'unsaved' : 'saved'}">${state.dirty ? 'Unsaved changes' : `Saved · v${state.revision}`}</span><button id="validate-button" class="button button-outline" data-action="validate">Validate</button><button class="button button-outline" data-action="versions">Versions</button><button class="button button-outline" data-action="import-draft">Import JSON</button><button class="button button-outline" data-action="export-draft">Export JSON</button><button id="version-button" class="button button-primary" data-action="create-version" ${state.dirty ? 'disabled' : ''}>Save version</button><button id="save-button" class="button button-primary" data-action="save" ${state.dirty ? '' : 'disabled'}>Save draft</button><input id="import-draft-file" class="file-input-hidden" type="file" accept="application/json,.json" aria-label="Choose a RuleCanvas draft JSON file"/></div></div>
     <div class="editor-workspace">
-      <aside class="editor-left"><div class="panel-heading"><div><h3>Build</h3><p>Drag concepts onto the canvas</p></div></div><div class="palette-group"><span class="palette-label">FLOW</span><button class="palette-card" draggable="true" data-add-node="condition"><span class="palette-symbol palette-condition">?</span><span><strong>Condition</strong><small>Compare an input value</small></span><span class="palette-plus">+</span></button><button class="palette-card" draggable="true" data-add-node="outcome"><span class="palette-symbol palette-outcome">✓</span><span><strong>Outcome</strong><small>Return a decision</small></span><span class="palette-plus">+</span></button></div>${renderSchema()}<div class="left-help"><span>⌘</span><span>Drag a node onto the canvas. Connect output ports to inputs; keyboard users can select an output then an input.</span></div></aside>
+      <aside class="editor-left"><div class="panel-heading"><div><h3>Build</h3><p>Drag concepts onto the canvas</p></div></div><div class="palette-group"><span class="palette-label">FLOW</span><button class="palette-card" draggable="true" data-add-node="condition"><span class="palette-symbol palette-condition">?</span><span><strong>Condition</strong><small>Compare an input value</small></span><span class="palette-plus">+</span></button><button class="palette-card" draggable="true" data-add-node="group"><span class="palette-symbol palette-group-symbol">∧</span><span><strong>Logic group</strong><small>Combine tests using AND / OR</small></span><span class="palette-plus">+</span></button><button class="palette-card" draggable="true" data-add-node="outcome"><span class="palette-symbol palette-outcome">✓</span><span><strong>Outcome</strong><small>Return a decision</small></span><span class="palette-plus">+</span></button></div>${renderSchema()}<div class="left-help"><span>⌘</span><span>Drag a node onto the canvas. Connect output ports to inputs; keyboard users can select an output then an input.</span></div></aside>
       <section class="canvas-area"><div class="canvas-topline"><div><strong>Decision canvas</strong><span>${state.graph.nodes.length} nodes · ${state.graph.edges.length} connections</span></div><div class="canvas-tools"><button class="canvas-tool" data-action="zoom-out" aria-label="Zoom out">−</button><span class="zoom-label">${Math.round(state.zoom * 100)}%</span><button class="canvas-tool" data-action="zoom-in" aria-label="Zoom in">+</button><button class="canvas-tool fit-tool" data-action="fit" title="Fit graph">Fit</button><button id="delete-edge-button" class="canvas-tool" data-action="delete-edge" title="Select a connection to remove" aria-label="Delete selected connection" ${state.selectedEdgeId ? '' : 'disabled'}>Remove link</button></div></div><div class="canvas-viewport" id="canvas-viewport">${renderCanvasMarkup()}<div class="canvas-hint"><span class="hint-key">Esc</span> Cancel connection <span class="hint-divider">·</span> Drag canvas with space</div></div>${renderValidation()}</section>
       <aside class="editor-right"><div id="inspector-panel" class="inspector-panel"><div class="panel-heading"><div><h3>Properties</h3><p>Edit the selected node</p></div></div>${renderInspector()}</div>${renderTestPanel()}</aside>
     </div>
@@ -484,17 +598,20 @@ function newNode(type, point = null) {
   checkpointHistory();
   const conditionCount = state.graph.nodes.filter((node) => node.type === 'condition').length;
   const outcomeCount = state.graph.nodes.filter((node) => node.type === 'outcome').length;
-  const centerX = point?.x ?? (type === 'condition' ? 360 + conditionCount * 285 : 710);
-  const centerY = point?.y ?? (type === 'condition' ? 205 + (conditionCount % 2) * 170 : 135 + outcomeCount * 220);
+  const centerX = point?.x ?? (type === 'condition' || type === 'group' ? 360 + (conditionCount + state.graph.nodes.filter((node) => node.type === 'group').length) * 285 : 710);
+  const centerY = point?.y ?? (type === 'condition' || type === 'group' ? 205 + (conditionCount % 2) * 170 : 135 + outcomeCount * 220);
   const position = { x: Math.max(24, Math.min(960, Math.round(centerX))), y: Math.max(24, Math.min(625, Math.round(centerY))) };
-  if (type === 'condition') {
+  if (type === 'condition' || type === 'group') {
     let field = state.graph.schema[0];
     if (!field) {
       field = { id: id('field'), name: 'New input', type: 'string', required: true };
       state.graph.schema.push(field);
       showToast('Added a text input field for this condition. Edit its type in Input fields.', 'success');
     }
-    const node = { id: id('node'), type, ...position, fieldId: field.id, operator: 'eq', value: field.type === 'number' ? 0 : field.type === 'boolean' ? true : field.type === 'enum' ? field.options?.[0] ?? '' : field.type === 'date' ? '2026-01-01' : '' };
+    const leaf = () => ({ type: 'condition', fieldId: field.id, operator: 'eq', value: defaultTermValue(field) });
+    const node = type === 'group'
+      ? { id: id('node'), type, ...position, operator: 'and', terms: [leaf(), leaf()] }
+      : { id: id('node'), type, ...position, fieldId: field.id, operator: 'eq', value: defaultTermValue(field) };
     state.graph.nodes.push(node);
     state.selectedNodeId = node.id;
   } else {
@@ -518,7 +635,26 @@ function updateField(fieldId, updates) {
   if (Object.entries(updates).every(([key, value]) => field[key] === value)) return;
   checkpointHistory();
   Object.assign(field, updates);
+  const normalizeLeaf = (term) => {
+    if (term.type === 'group') { term.terms?.forEach(normalizeLeaf); return; }
+    if (term.fieldId !== field.id) return;
+    if (!operatorsFor(field.type).includes(term.operator)) term.operator = 'eq';
+    if (term.value === undefined || (field.type === 'number' && typeof term.value !== 'number') || (field.type === 'boolean' && typeof term.value !== 'boolean') || (field.type === 'enum' && !field.options?.includes(term.value))) term.value = defaultTermValue(field);
+  };
   for (const node of state.graph.nodes) {
+    if (node.type === 'group') {
+      const pending = Array.isArray(node.terms) ? node.terms.slice(0, 2048) : [];
+      let visited = 0;
+      while (pending.length && visited++ < 2048) {
+        const term = pending.pop();
+        if (!term || typeof term !== 'object') continue;
+        if (term.type === 'group') {
+          if (Array.isArray(term.terms)) pending.push(...term.terms.slice(0, Math.max(0, 2048 - visited - pending.length)));
+        }
+        else normalizeLeaf(term);
+      }
+      continue;
+    }
     if (node.type !== 'condition' || node.fieldId !== field.id) continue;
     const allowed = operatorsFor(field.type);
     if (!allowed.includes(node.operator)) node.operator = 'eq';
@@ -535,10 +671,10 @@ function portCompatible(source, target) {
   if (!source || !target || source.nodeId === target.nodeId || target.port !== 'in') return false;
   const from = state.graph.nodes.find((node) => node.id === source.nodeId);
   const to = state.graph.nodes.find((node) => node.id === target.nodeId);
-  if (!from || !to || !['condition', 'outcome'].includes(to.type)) return false;
+  if (!from || !to || !['condition', 'group', 'outcome'].includes(to.type)) return false;
   if (from.type === 'start' && source.port !== 'next') return false;
-  if (from.type === 'condition' && !['true', 'false'].includes(source.port)) return false;
-  if (!['start', 'condition'].includes(from.type)) return false;
+  if (['condition', 'group'].includes(from.type) && !['true', 'false'].includes(source.port)) return false;
+  if (!['start', 'condition', 'group'].includes(from.type)) return false;
   if (state.graph.edges.some((edge) => edge.from === from.id && edge.fromPort === source.port)) return false;
   if (state.graph.edges.some((edge) => edge.to === to.id)) return false;
   return true;
@@ -792,6 +928,7 @@ app.addEventListener('click', async (event) => {
   const addNodeButton = event.target.closest('[data-add-node]');
   const removeFieldButton = event.target.closest('[data-remove-field]');
   const focusNodeButton = event.target.closest('[data-focus-node]');
+  const groupActionButton = event.target.closest('[data-group-action]');
   if (projectButton) { await openProject(projectButton.dataset.project); return; }
   if (rulesetButton) { await openRuleset(rulesetButton.dataset.ruleset); return; }
   if (addNodeButton) { newNode(addNodeButton.dataset.addNode); return; }
@@ -802,6 +939,7 @@ app.addEventListener('click', async (event) => {
     markDirty(); render(); return;
   }
   if (focusNodeButton) { state.selectedNodeId = focusNodeButton.dataset.focusNode; render(); return; }
+  if (groupActionButton) { addGroupTerm(groupActionButton.dataset.groupAction, groupActionButton.dataset.groupPath); return; }
   if (!action) return;
   try {
     if (action === 'dashboard') {
@@ -865,7 +1003,7 @@ app.addEventListener('dragover', (event) => {
 app.addEventListener('drop', (event) => {
   const viewport = event.target.closest('#canvas-viewport');
   const type = event.dataTransfer?.getData('application/x-rulecanvas-node');
-  if (!viewport || !['condition', 'outcome'].includes(type)) return;
+  if (!viewport || !['condition', 'group', 'outcome'].includes(type)) return;
   event.preventDefault();
   newNode(type, svgPoint(event));
 });
@@ -937,6 +1075,12 @@ app.addEventListener('change', (event) => {
     if (prop === 'options') updateField(field.id, { options: event.target.value.split(',').map((item) => item.trim()).filter(Boolean) });
     return;
   }
+  if (event.target.id === 'root-group-operator') {
+    const node = state.graph.nodes.find((item) => item.id === state.selectedNodeId && item.type === 'group');
+    if (node && node.operator !== event.target.value) { checkpointHistory(); node.operator = event.target.value; state.result = null; markDirty(); render(); }
+    return;
+  }
+  if (event.target.dataset.groupProp) { checkpointHistory(); updateGroupControl(event.target); return; }
   if (event.target.id === 'condition-field') {
     const node = state.graph.nodes.find((item) => item.id === state.selectedNodeId);
     const targetField = state.graph.schema.find((item) => item.id === event.target.value);

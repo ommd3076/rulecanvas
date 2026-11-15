@@ -69,6 +69,46 @@ test('creates and reloads a project and ruleset through the local HTTP API', asy
   assert.deepEqual(reloaded.body.project.rulesets[0].graph, validGraph());
 });
 
+test('persists nested AND OR groups and replays their typed evaluation trace', async (t) => {
+  const base = await startServer(t);
+  const project = (await jsonRequest(base, '/api/projects', { method: 'POST', body: JSON.stringify({ name: 'Grouped rules' }) })).body.project;
+  const ruleset = (await jsonRequest(base, `/api/projects/${project.id}/rulesets`, { method: 'POST', body: JSON.stringify({ name: 'Precedence' }) })).body.ruleset;
+  const graph = {
+    schema: [{ id: 'score', name: 'score', type: 'number', required: true }],
+    nodes: [
+      { id: 'start', type: 'start', x: 40, y: 80 },
+      { id: 'logic', type: 'group', operator: 'or', terms: [
+        { type: 'condition', fieldId: 'score', operator: 'gte', value: 8 },
+        { type: 'group', operator: 'and', terms: [
+          { type: 'condition', fieldId: 'score', operator: 'gte', value: 5 },
+          { type: 'condition', fieldId: 'score', operator: 'lte', value: 7 },
+        ] },
+      ], x: 330, y: 80 },
+      { id: 'yes', type: 'outcome', label: 'Accept', result: { decision: 'accept' }, x: 650, y: 20 },
+      { id: 'no', type: 'outcome', label: 'Review', result: { decision: 'review' }, x: 650, y: 240 },
+    ],
+    edges: [
+      { id: 'start-logic', from: 'start', fromPort: 'next', to: 'logic', toPort: 'in' },
+      { id: 'logic-yes', from: 'logic', fromPort: 'true', to: 'yes', toPort: 'in' },
+      { id: 'logic-no', from: 'logic', fromPort: 'false', to: 'no', toPort: 'in' },
+    ],
+  };
+  const saved = await jsonRequest(base, `/api/rulesets/${ruleset.id}`, { method: 'PUT', body: JSON.stringify({ expectedRevision: 1, name: ruleset.name, graph }) });
+  assert.equal(saved.status, 200);
+  const evaluation = await jsonRequest(base, `/api/rulesets/${ruleset.id}/evaluate`, { method: 'POST', body: JSON.stringify({ input: { score: 6 } }) });
+  assert.equal(evaluation.body.ok, true);
+  assert.deepEqual(evaluation.body.result, { decision: 'accept' });
+  assert.equal(evaluation.body.trace.find((entry) => entry.kind === 'group').terms[1].operator, 'and');
+  assert.equal((await jsonRequest(base, `/api/rulesets/${ruleset.id}/evaluate`, { method: 'POST', body: JSON.stringify({ input: { score: 4 } }) })).body.result.decision, 'review');
+  const version = await jsonRequest(base, `/api/rulesets/${ruleset.id}/versions`, { method: 'POST', body: JSON.stringify({ expectedRevision: 2 }) });
+  assert.equal(version.status, 201);
+  const reopened = await jsonRequest(base, `/api/rulesets/${ruleset.id}`);
+  assert.deepEqual(reopened.body.ruleset.graph, graph);
+  const replay = await jsonRequest(base, `/api/rulesets/${ruleset.id}/versions/${version.body.version.id}/evaluate`, { method: 'POST', body: JSON.stringify({ input: { score: 6 } }) });
+  assert.deepEqual(replay.body.result, { decision: 'accept' });
+  assert.deepEqual(replay.body.trace, evaluation.body.trace);
+});
+
 test('rejects stale draft writes instead of silently overwriting a newer revision', async (t) => {
   const base = await startServer(t);
   const project = (await jsonRequest(base, '/api/projects', { method: 'POST', body: JSON.stringify({ name: 'Concurrent edits' }) })).body.project;

@@ -6,7 +6,8 @@ RuleCanvas is a visual workbench for building, validating, and evaluating determ
 
 - Create a named project and reopen it from local JSON storage.
 - Create a draft ruleset with a persistent revision number.
-- Edit an interactive SVG graph: drag condition and outcome nodes from the palette, move nodes, and connect typed flow ports by pointer or keyboard.
+- Edit an interactive SVG graph: drag condition, logic-group, and outcome nodes from the palette, move nodes, and connect typed flow ports by pointer or keyboard.
+- Build nested AND/OR groups in the inspector with typed condition leaves; nested groups explicitly define mixed-operator precedence and expose true/false graph branches.
 - Select and remove an incorrect connection directly, with undo support; endpoint nodes and other branches remain in place.
 - Confirm node deletion before its connected links are removed; undo remains available afterward.
 - Undo and redo graph edits with grouped text entry, toolbar controls, and editor keyboard shortcuts.
@@ -47,7 +48,7 @@ The visual language follows the provided light dashboard references: pale mint/o
 
 ## Evaluation semantics
 
-Graphs use one `start` node, `condition` nodes with `true` and `false` flow outputs, and terminal `outcome` nodes. Every condition requires one edge on each branch. Connections must use declared output and input ports. Values are type checked without string-to-number coercion. Optional missing values are treated as `null`; a comparison against an absent optional value follows the `false` branch. Dates use strict `YYYY-MM-DD` values and UTC calendar comparisons. Evaluation follows edges, never canvas coordinates.
+Graphs use one `start` node, `condition` nodes, `group` nodes, and terminal `outcome` nodes. Conditions and groups have `true` and `false` flow outputs; each requires one edge on each branch. A group combines its direct terms with one operator (`and` or `or`); terms can be typed conditions or nested groups. Nesting supplies explicit parentheses and precedence; a group cannot mix operators among its direct terms. Validation bounds group depth to 16, each group to 128 terms, and a graph to 2,048 total group terms. Evaluation checks all terms rather than short-circuiting, so traces include each branch decision in stable order. Connections must use declared output and input ports. Values are type checked without string-to-number coercion. Optional missing values are treated as `null`; a comparison against an absent optional value follows the `false` branch. Dates use strict `YYYY-MM-DD` values and UTC calendar comparisons. Evaluation follows edges, never canvas coordinates.
 
 ## Next gates
 

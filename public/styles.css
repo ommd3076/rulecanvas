@@ -192,6 +192,21 @@ h1 { margin: 0; font-size: clamp(26px, 3vw, 36px); line-height: 1.1; letter-spac
 .canvas-viewport { position: relative; flex: 1; min-height: 0; overflow: hidden; }
 .graph-canvas { width: 100%; height: 100%; display: block; touch-action: none; user-select: none; }
 .graph-node { cursor: grab; }
+.node-group .node-surface { fill: #f2eaff; stroke: #d8c4f4; }
+.node-group .node-divider { stroke: #dfd1f1; }
+.node-group .accent-group { fill: #e2d2f6; }
+.palette-group-symbol { background: #f0e6ff; color: #8052af; }
+.logic-group-terms { display: grid; gap: 9px; margin: 12px 0; }
+.logic-term { min-width: 0; border: 1px solid #e3ebe6; border-radius: 10px; background: #fbfdfc; }
+.logic-leaf { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .9fr) minmax(0, 1fr) 26px; align-items: center; gap: 5px; padding: 7px; }
+.logic-leaf .form-control, .logic-operator { min-width: 0; min-height: 32px; padding: 0 7px; font-size: 10px; }
+.logic-term-heading { display: flex; align-items: center; gap: 6px; padding: 7px; }
+.logic-term-actions { display: flex; gap: 3px; margin-left: auto; }
+.logic-subgroup { padding: 0; background: #f8f4fc; }
+.logic-term-children { display: grid; gap: 6px; padding: 0 7px 7px 16px; }
+.logic-add-actions { display: flex; gap: 7px; }
+.logic-add-actions .button { min-height: 32px; padding: 0 9px; font-size: 10px; }
+.logic-term .tiny-remove:disabled { opacity: .35; cursor: not-allowed; }
 .graph-node:active { cursor: grabbing; }
 .node-surface { fill: #fff; stroke: #e2ebe6; stroke-width: 1.5; filter: drop-shadow(0 7px 12px rgba(59, 86, 72, .08)); }
 .graph-node.is-selected .node-surface { stroke: #56bc7e; stroke-width: 2; }
