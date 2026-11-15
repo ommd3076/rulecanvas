@@ -115,6 +115,32 @@ export function createRuleCanvasServer({ store = new JsonStore() } = {}) {
         sendJson(response, 200, { ruleset });
         return;
       }
+      match = url.pathname.match(/^\/api\/rulesets\/([0-9a-f-]+)\/versions$/i);
+      if (match && method === 'GET') {
+        sendJson(response, 200, { versions: await store.listVersions(match[1]) });
+        return;
+      }
+      if (match && method === 'POST') {
+        const body = await readBody(request);
+        sendJson(response, 201, { version: await store.createVersion(match[1], body.expectedRevision) });
+        return;
+      }
+      match = url.pathname.match(/^\/api\/rulesets\/([0-9a-f-]+)\/versions\/([0-9a-f-]+)(?:\/(evaluate))?$/i);
+      if (match && method === 'GET' && !match[3]) {
+        sendJson(response, 200, { version: await store.getVersion(match[1], match[2]) });
+        return;
+      }
+      if (match && method === 'POST' && match[3] === 'evaluate') {
+        const version = await store.getVersion(match[1], match[2]);
+        const body = await readBody(request);
+        sendJson(response, 200, { version: { id: version.id, versionNumber: version.versionNumber, graphHash: version.graphHash }, ...evaluateGraph(version.graph, body.input) });
+        return;
+      }
+      match = url.pathname.match(/^\/api\/projects\/([0-9a-f-]+)\/audit$/i);
+      if (match && method === 'GET') {
+        sendJson(response, 200, { events: await store.listAuditEvents(match[1]) });
+        return;
+      }
       match = url.pathname.match(/^\/api\/rulesets\/([0-9a-f-]+)\/(validate|evaluate)$/i);
       if (match && method === 'POST') {
         const ruleset = await store.getRuleset(match[1]);
@@ -143,6 +169,7 @@ export function createRuleCanvasServer({ store = new JsonStore() } = {}) {
         error: {
           code: error instanceof StoreError ? error.code : 'server.error',
           message: error instanceof StoreError ? error.message : 'The request could not be completed.',
+          ...(error instanceof StoreError && error.details ? { details: error.details } : {}),
         },
       });
     }

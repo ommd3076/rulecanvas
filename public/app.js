@@ -108,11 +108,13 @@ function applyHistory(direction) {
 function renderEditorHeaderState() {
   const status = document.querySelector('#save-status');
   const button = document.querySelector('#save-button');
+  const versionButton = document.querySelector('#version-button');
   if (status) {
     status.textContent = state.saveState === 'saving' ? 'Saving…' : state.dirty ? 'Unsaved changes' : `Saved · v${state.revision}`;
     status.dataset.state = state.dirty ? state.saveState : 'saved';
   }
   if (button) button.disabled = !state.dirty || state.saveState === 'saving';
+  if (versionButton) versionButton.disabled = state.dirty || state.saveState === 'saving';
   renderHistoryButtons();
 }
 
@@ -191,7 +193,7 @@ function renderProject() {
     <button class="back-link" data-action="dashboard">← All projects</button>
     <div class="page-heading project-heading"><div><p class="eyebrow">PROJECT</p><h1>${escapeHtml(state.project.name)}</h1><p class="lede">Create a rule set and shape the path from input to outcome.</p></div><button class="button button-primary" data-action="new-ruleset"><span class="plus">+</span> New rule set</button></div>
     <div class="section-row"><div><h2>Rule sets <span class="count-pill">${rulesets.length}</span></h2><p class="section-note">Drafts can be edited and saved as you work.</p></div></div>
-    <div class="ruleset-list">${rulesets.length ? rulesets.map((ruleset) => `<button class="ruleset-card" data-ruleset="${escapeHtml(ruleset.id)}"><span class="ruleset-icon">◇</span><span class="ruleset-main"><strong>${escapeHtml(ruleset.name)}</strong><small>Draft · Revision ${ruleset.revision} · Updated ${new Date(ruleset.updatedAt).toLocaleString()}</small></span><span class="ruleset-arrow">→</span></button>`).join('') : `<div class="empty-inline"><span class="empty-inline-icon">◇</span><div><strong>No rule sets yet</strong><p>Create one to open the graph editor.</p></div><button class="button button-secondary" data-action="new-ruleset">Create rule set</button></div>`}</div>
+    <div class="ruleset-list">${rulesets.length ? rulesets.map((ruleset) => `<button class="ruleset-card" data-ruleset="${escapeHtml(ruleset.id)}"><span class="ruleset-icon">◇</span><span class="ruleset-main"><strong>${escapeHtml(ruleset.name)}</strong><small>${escapeHtml(ruleset.status === 'versioned' ? `Version ${ruleset.latestVersionNumber} saved` : 'Draft')} · Revision ${ruleset.revision} · ${ruleset.versionCount} saved version${ruleset.versionCount === 1 ? '' : 's'} · Updated ${new Date(ruleset.updatedAt).toLocaleString()}</small></span><span class="ruleset-arrow">→</span></button>`).join('') : `<div class="empty-inline"><span class="empty-inline-icon">◇</span><div><strong>No rule sets yet</strong><p>Create one to open the graph editor.</p></div><button class="button button-secondary" data-action="new-ruleset">Create rule set</button></div>`}</div>
   </section>`);
 }
 
@@ -320,7 +322,7 @@ function renderValidation() {
 
 function renderEditor() {
   app.innerHTML = shell(`<section class="editor-page">
-    <div class="editor-toolbar"><div class="editor-title"><button class="back-icon" data-action="back-project" aria-label="Back to project">←</button><div><div class="editor-project-label">${escapeHtml(state.project.name)} <span>›</span></div><input id="ruleset-name" aria-label="Rule set name" value="${escapeHtml(state.ruleset.name)}" maxlength="80"/></div></div><div class="editor-actions"><button id="undo-button" class="history-button" data-action="undo" aria-label="Undo" title="Undo (Ctrl+Z)" disabled>↶</button><button id="redo-button" class="history-button" data-action="redo" aria-label="Redo" title="Redo (Ctrl+Y)" disabled>↷</button><span id="save-status" class="save-status" data-state="${state.dirty ? 'unsaved' : 'saved'}">${state.dirty ? 'Unsaved changes' : `Saved · v${state.revision}`}</span><button id="validate-button" class="button button-outline" data-action="validate">Validate</button><button id="save-button" class="button button-primary" data-action="save" ${state.dirty ? '' : 'disabled'}>Save draft</button></div></div>
+    <div class="editor-toolbar"><div class="editor-title"><button class="back-icon" data-action="back-project" aria-label="Back to project">←</button><div><div class="editor-project-label">${escapeHtml(state.project.name)} <span>›</span></div><input id="ruleset-name" aria-label="Rule set name" value="${escapeHtml(state.ruleset.name)}" maxlength="80"/></div></div><div class="editor-actions"><button id="undo-button" class="history-button" data-action="undo" aria-label="Undo" title="Undo (Ctrl+Z)" disabled>↶</button><button id="redo-button" class="history-button" data-action="redo" aria-label="Redo" title="Redo (Ctrl+Y)" disabled>↷</button><span id="save-status" class="save-status" data-state="${state.dirty ? 'unsaved' : 'saved'}">${state.dirty ? 'Unsaved changes' : `Saved · v${state.revision}`}</span><button id="validate-button" class="button button-outline" data-action="validate">Validate</button><button class="button button-outline" data-action="versions">Versions</button><button id="version-button" class="button button-primary" data-action="create-version" ${state.dirty ? 'disabled' : ''}>Save version</button><button id="save-button" class="button button-primary" data-action="save" ${state.dirty ? '' : 'disabled'}>Save draft</button></div></div>
     <div class="editor-workspace">
       <aside class="editor-left"><div class="panel-heading"><div><h3>Build</h3><p>Drag concepts onto the canvas</p></div></div><div class="palette-group"><span class="palette-label">FLOW</span><button class="palette-card" draggable="true" data-add-node="condition"><span class="palette-symbol palette-condition">?</span><span><strong>Condition</strong><small>Compare an input value</small></span><span class="palette-plus">+</span></button><button class="palette-card" draggable="true" data-add-node="outcome"><span class="palette-symbol palette-outcome">✓</span><span><strong>Outcome</strong><small>Return a decision</small></span><span class="palette-plus">+</span></button></div>${renderSchema()}<div class="left-help"><span>⌘</span><span>Drag a node onto the canvas. Connect output ports to inputs; keyboard users can select an output then an input.</span></div></aside>
       <section class="canvas-area"><div class="canvas-topline"><div><strong>Decision canvas</strong><span>${state.graph.nodes.length} nodes · ${state.graph.edges.length} connections</span></div><div class="canvas-tools"><button class="canvas-tool" data-action="zoom-out" aria-label="Zoom out">−</button><span class="zoom-label">${Math.round(state.zoom * 100)}%</span><button class="canvas-tool" data-action="zoom-in" aria-label="Zoom in">+</button><button class="canvas-tool fit-tool" data-action="fit" title="Fit graph">Fit</button></div></div><div class="canvas-viewport" id="canvas-viewport">${renderCanvasMarkup()}<div class="canvas-hint"><span class="hint-key">Esc</span> Cancel connection <span class="hint-divider">·</span> Drag canvas with space</div></div>${renderValidation()}</section>
@@ -647,6 +649,14 @@ app.addEventListener('click', async (event) => {
       await openRuleset(data.ruleset.id);
     } else if (action === 'back-project') await openProject(state.project.id);
     else if (action === 'save') await saveDraft();
+    else if (action === 'create-version') {
+      if (state.dirty) { showToast('Save the draft before creating a version.', 'error'); return; }
+      const data = await api(`/api/rulesets/${encodeURIComponent(state.ruleset.id)}/versions`, { method: 'POST', body: JSON.stringify({ expectedRevision: state.revision }) });
+      showToast(`Saved immutable version ${data.version.versionNumber}.`, 'success');
+    } else if (action === 'versions') {
+      const { versions } = await api(`/api/rulesets/${encodeURIComponent(state.ruleset.id)}/versions`);
+      showToast(versions.length ? versions.map((version) => `v${version.versionNumber} · ${version.graphHash.slice(0, 12)}`).join(' | ') : 'No saved versions yet.', 'info');
+    }
     else if (action === 'undo') applyHistory('undo');
     else if (action === 'redo') applyHistory('redo');
     else if (action === 'validate') await validateDraft();

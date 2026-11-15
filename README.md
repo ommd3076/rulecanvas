@@ -12,6 +12,8 @@ RuleCanvas is a visual workbench for building, validating, and evaluating determ
 - Validate branch completeness, edge compatibility, duplicate IDs, missing references, cycles, and unreachable nodes.
 - Evaluate a saved graph against typed input and return a deterministic result with an ordered node-ID trace.
 - Reject stale concurrent draft writes with a revision conflict instead of silently overwriting.
+- Save valid drafts as immutable, locally stored graph versions with SHA-256 content hashes; replay a chosen version independently from later draft edits.
+- Record local project and ruleset creation, draft-save, and version-save events for inspection through the API.
 - Keep node coordinates as layout metadata; evaluation semantics use node and edge data only.
 
 ## Run locally
@@ -33,7 +35,7 @@ Open `http://127.0.0.1:4178`. By default, project data is written to `data/rulec
 - `src/server.mjs` serves the app and a small JSON API, binding to `127.0.0.1` by default.
 - `public/` contains the dependency-free HTML, CSS, SVG canvas, and browser interaction code.
 
-This is a local single-user prototype. It has no authentication, role system, remote database, multi-process locking, audit history, immutable published versions, or production deployment. Local file persistence and a same-process conflict test do not establish production durability or multi-user concurrency. Do not bind this server to a public interface.
+This is a local single-user prototype. Version records and the event ledger are local workspace data, not a hosted publishing or approval system; there is no authentication, role system, remote database, actor identity beyond `local workspace`, or multi-process locking. Local file persistence and a same-process conflict test do not establish production durability or multi-user concurrency. Do not bind this server to a public interface.
 
 The visual language follows the provided light dashboard references: pale mint/off-white surfaces, compact sans type, white cards, restrained pastel accents, and minimal borders. The graph canvas prioritizes branch labels, typed fields, precise selection, and visible validation. Browser/device visual QA has not yet been performed; no screenshot or browser-pass claim is made.
 
@@ -45,7 +47,7 @@ Graphs use one `start` node, `condition` nodes with `true` and `false` flow outp
 
 1. Run pointer and keyboard flows in a real browser at desktop, tablet, and mobile widths; inspect saved/reopened node positions and connections.
 2. Add delete confirmation, autosave/retry states, import/export, and stronger schema migration handling.
-3. Decide and implement authentication, durable shared persistence, audit events, immutable published versions, and authorization before any hosted multi-user release.
+3. Decide and implement authenticated actors, durable shared persistence, approval rules, and authorization before any hosted multi-user release.
 4. Add API abuse limits and cross-process locking before treating the local server as a shared backend.
 
 ## License

@@ -85,6 +85,53 @@ test('rejects stale draft writes instead of silently overwriting a newer revisio
   assert.equal(conflict.body.error.code, 'ruleset.conflict');
 });
 
+test('creates validated immutable versions with replay and local audit evidence', async (t) => {
+  const base = await startServer(t);
+  const project = (await jsonRequest(base, '/api/projects', { method: 'POST', body: JSON.stringify({ name: 'Versioned decisions' }) })).body.project;
+  const ruleset = (await jsonRequest(base, `/api/projects/${project.id}/rulesets`, { method: 'POST', body: JSON.stringify({ name: 'Eligibility' }) })).body.ruleset;
+  const saved = await jsonRequest(base, `/api/rulesets/${ruleset.id}`, { method: 'PUT', body: JSON.stringify({ expectedRevision: 1, name: 'Eligibility', graph: validGraph() }) });
+  assert.equal(saved.status, 200);
+
+  const created = await jsonRequest(base, `/api/rulesets/${ruleset.id}/versions`, { method: 'POST', body: JSON.stringify({ expectedRevision: 2 }) });
+  assert.equal(created.status, 201);
+  const version = created.body.version;
+  assert.equal(version.versionNumber, 1);
+  assert.match(version.graphHash, /^[a-f0-9]{64}$/);
+
+  const replay = await jsonRequest(base, `/api/rulesets/${ruleset.id}/versions/${version.id}/evaluate`, { method: 'POST', body: JSON.stringify({ input: { score: 8, tier: 'priority' } }) });
+  assert.deepEqual(replay.body.result, { decision: 'eligible' });
+  assert.equal(replay.body.version.graphHash, version.graphHash);
+  const duplicate = await jsonRequest(base, `/api/rulesets/${ruleset.id}/versions`, { method: 'POST', body: JSON.stringify({ expectedRevision: 2 }) });
+  assert.equal(duplicate.status, 409);
+  assert.equal(duplicate.body.error.code, 'version.unchanged');
+
+  const edited = validGraph();
+  edited.nodes.find((node) => node.id === 'eligible').result = { decision: 'edited draft' };
+  const savedAgain = await jsonRequest(base, `/api/rulesets/${ruleset.id}`, { method: 'PUT', body: JSON.stringify({ expectedRevision: 2, name: 'Eligibility', graph: edited }) });
+  assert.equal(savedAgain.status, 200);
+  const oldVersion = await jsonRequest(base, `/api/rulesets/${ruleset.id}/versions/${version.id}`);
+  assert.deepEqual(oldVersion.body.version.graph, validGraph());
+  const list = await jsonRequest(base, `/api/rulesets/${ruleset.id}/versions`);
+  assert.equal(list.body.versions.length, 1);
+  assert.equal('graph' in list.body.versions[0], false);
+
+  const audit = await jsonRequest(base, `/api/projects/${project.id}/audit`);
+  assert.deepEqual(audit.body.events.map((event) => event.type).sort(), ['project.created', 'ruleset.created', 'ruleset.draft.saved', 'ruleset.draft.saved', 'ruleset.version.created'].sort());
+  assert.equal(audit.body.events.find((event) => event.type === 'ruleset.version.created').details.graphHash, version.graphHash);
+});
+
+test('refuses invalid or stale version snapshots', async (t) => {
+  const base = await startServer(t);
+  const project = (await jsonRequest(base, '/api/projects', { method: 'POST', body: JSON.stringify({ name: 'Invalid version' }) })).body.project;
+  const ruleset = (await jsonRequest(base, `/api/projects/${project.id}/rulesets`, { method: 'POST', body: JSON.stringify({ name: 'Draft' }) })).body.ruleset;
+  const invalid = await jsonRequest(base, `/api/rulesets/${ruleset.id}/versions`, { method: 'POST', body: JSON.stringify({ expectedRevision: 1 }) });
+  assert.equal(invalid.status, 422);
+  assert.equal(invalid.body.error.code, 'version.validation');
+  assert.ok(invalid.body.error.details.errors.length > 0);
+  const stale = await jsonRequest(base, `/api/rulesets/${ruleset.id}/versions`, { method: 'POST', body: JSON.stringify({ expectedRevision: 2 }) });
+  assert.equal(stale.status, 409);
+});
+
 test('serves app assets from the public directory and blocks traversal', async (t) => {
   const base = await startServer(t);
   const index = await fetch(base);

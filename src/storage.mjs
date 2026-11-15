@@ -1,14 +1,22 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import { createStarterGraph } from './rule-engine.mjs';
+import { createStarterGraph, validateGraph } from './rule-engine.mjs';
 
 export class StoreError extends Error {
-  constructor(message, status = 400, code = 'store.error') {
+  constructor(message, status = 400, code = 'store.error', details = undefined) {
     super(message);
     this.status = status;
     this.code = code;
+    this.details = details;
   }
+}
+
+function addAuditEvent(data, { projectId, rulesetId = null, type, details = {} }) {
+  data.auditEvents.push({
+    id: randomUUID(), projectId, rulesetId, actor: 'local workspace', type,
+    details, occurredAt: new Date().toISOString(),
+  });
 }
 
 function slugify(value) {
@@ -31,9 +39,15 @@ export class JsonStore {
 
   async #read() {
     try {
-      return JSON.parse(await readFile(this.#file, 'utf8'));
+      const stored = JSON.parse(await readFile(this.#file, 'utf8'));
+      return {
+        projects: Array.isArray(stored.projects) ? stored.projects : [],
+        rulesets: Array.isArray(stored.rulesets) ? stored.rulesets : [],
+        versions: Array.isArray(stored.versions) ? stored.versions : [],
+        auditEvents: Array.isArray(stored.auditEvents) ? stored.auditEvents : [],
+      };
     } catch (error) {
-      if (error.code === 'ENOENT') return { projects: [], rulesets: [] };
+      if (error.code === 'ENOENT') return { projects: [], rulesets: [], versions: [], auditEvents: [] };
       throw error;
     }
   }
@@ -72,7 +86,11 @@ export class JsonStore {
     const data = await this.#read();
     const project = data.projects.find((item) => item.id === projectId);
     if (!project) throw new StoreError('Project not found.', 404, 'project.not_found');
-    return { ...project, rulesets: data.rulesets.filter((item) => item.projectId === projectId) };
+    const rulesets = data.rulesets.filter((item) => item.projectId === projectId).map((ruleset) => {
+      const versions = data.versions.filter((version) => version.rulesetId === ruleset.id).sort((a, b) => b.versionNumber - a.versionNumber);
+      return { ...ruleset, versionCount: versions.length, latestVersionNumber: versions[0]?.versionNumber ?? null };
+    });
+    return { ...project, rulesets };
   }
 
   async createProject(name) {
@@ -94,6 +112,7 @@ export class JsonStore {
         updatedAt: new Date().toISOString(),
       };
       data.projects.push(project);
+      addAuditEvent(data, { projectId: project.id, type: 'project.created', details: { slug: project.slug } });
       return project;
     });
   }
@@ -127,6 +146,7 @@ export class JsonStore {
       data.rulesets.push(ruleset);
       const project = data.projects.find((item) => item.id === projectId);
       project.updatedAt = new Date().toISOString();
+      addAuditEvent(data, { projectId, rulesetId: ruleset.id, type: 'ruleset.created', details: { name: normalizedName } });
       return ruleset;
     });
   }
@@ -147,8 +167,75 @@ export class JsonStore {
       ruleset.graph = structuredClone(graph);
       ruleset.name = name.trim();
       ruleset.revision++;
+      ruleset.status = 'draft';
       ruleset.updatedAt = new Date().toISOString();
+      const project = data.projects.find((item) => item.id === ruleset.projectId);
+      if (project) project.updatedAt = ruleset.updatedAt;
+      addAuditEvent(data, { projectId: ruleset.projectId, rulesetId, type: 'ruleset.draft.saved', details: { revision: ruleset.revision } });
       return ruleset;
     });
+  }
+
+  async listVersions(rulesetId) {
+    const data = await this.#read();
+    if (!data.rulesets.some((item) => item.id === rulesetId)) throw new StoreError('Ruleset not found.', 404, 'ruleset.not_found');
+    return data.versions
+      .filter((version) => version.rulesetId === rulesetId)
+      .sort((a, b) => b.versionNumber - a.versionNumber)
+      .map(({ graph, ...summary }) => summary);
+  }
+
+  async getVersion(rulesetId, versionId) {
+    const data = await this.#read();
+    const version = data.versions.find((item) => item.rulesetId === rulesetId && item.id === versionId);
+    if (!version) throw new StoreError('Published version not found.', 404, 'version.not_found');
+    return version;
+  }
+
+  async createVersion(rulesetId, expectedRevision) {
+    return this.#transact((data) => {
+      const ruleset = data.rulesets.find((item) => item.id === rulesetId);
+      if (!ruleset) throw new StoreError('Ruleset not found.', 404, 'ruleset.not_found');
+      if (expectedRevision !== ruleset.revision) {
+        throw new StoreError('This draft changed elsewhere. Reload it before creating a version.', 409, 'ruleset.conflict');
+      }
+      const validation = validateGraph(ruleset.graph);
+      if (!validation.valid) {
+        throw new StoreError('Only a valid graph can be saved as an immutable version.', 422, 'version.validation', { errors: validation.errors });
+      }
+      const graphJson = JSON.stringify(ruleset.graph);
+      const graphHash = createHash('sha256').update(graphJson).digest('hex');
+      const existing = data.versions.filter((version) => version.rulesetId === rulesetId).sort((a, b) => b.versionNumber - a.versionNumber)[0];
+      if (existing?.graphHash === graphHash) {
+        throw new StoreError('This graph is already the latest saved version.', 409, 'version.unchanged');
+      }
+      const version = {
+        id: randomUUID(),
+        rulesetId,
+        projectId: ruleset.projectId,
+        versionNumber: (existing?.versionNumber ?? 0) + 1,
+        sourceRevision: ruleset.revision,
+        name: ruleset.name,
+        graph: structuredClone(ruleset.graph),
+        graphHash,
+        createdAt: new Date().toISOString(),
+      };
+      data.versions.push(version);
+      ruleset.status = 'versioned';
+      ruleset.latestVersionId = version.id;
+      ruleset.updatedAt = version.createdAt;
+      const project = data.projects.find((item) => item.id === ruleset.projectId);
+      if (project) project.updatedAt = version.createdAt;
+      addAuditEvent(data, { projectId: ruleset.projectId, rulesetId, type: 'ruleset.version.created', details: { versionNumber: version.versionNumber, sourceRevision: version.sourceRevision, graphHash } });
+      return version;
+    });
+  }
+
+  async listAuditEvents(projectId, rulesetId = null) {
+    const data = await this.#read();
+    if (!data.projects.some((item) => item.id === projectId)) throw new StoreError('Project not found.', 404, 'project.not_found');
+    return data.auditEvents
+      .filter((event) => event.projectId === projectId && (!rulesetId || event.rulesetId === rulesetId))
+      .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
   }
 }
