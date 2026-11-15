@@ -19,6 +19,13 @@ function addAuditEvent(data, { projectId, rulesetId = null, type, details = {} }
   });
 }
 
+function assertVersionIntegrity(version) {
+  const actualHash = createHash('sha256').update(JSON.stringify(version.graph)).digest('hex');
+  if (actualHash !== version.graphHash) {
+    throw new StoreError('Saved version content does not match its recorded hash.', 409, 'version.integrity');
+  }
+}
+
 function slugify(value) {
   return value
     .normalize('NFKD')
@@ -179,16 +186,18 @@ export class JsonStore {
   async listVersions(rulesetId) {
     const data = await this.#read();
     if (!data.rulesets.some((item) => item.id === rulesetId)) throw new StoreError('Ruleset not found.', 404, 'ruleset.not_found');
-    return data.versions
+    const versions = data.versions
       .filter((version) => version.rulesetId === rulesetId)
-      .sort((a, b) => b.versionNumber - a.versionNumber)
-      .map(({ graph, ...summary }) => summary);
+      .sort((a, b) => b.versionNumber - a.versionNumber);
+    versions.forEach(assertVersionIntegrity);
+    return versions.map(({ graph, ...summary }) => summary);
   }
 
   async getVersion(rulesetId, versionId) {
     const data = await this.#read();
     const version = data.versions.find((item) => item.rulesetId === rulesetId && item.id === versionId);
     if (!version) throw new StoreError('Published version not found.', 404, 'version.not_found');
+    assertVersionIntegrity(version);
     return version;
   }
 
