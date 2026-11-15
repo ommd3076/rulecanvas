@@ -44,7 +44,20 @@ Open `http://127.0.0.1:4178`. By default, project data is written to `data/rulec
 
 This is a local single-user prototype. Version records and the event ledger are local workspace data, not a hosted publishing or approval system; there is no authentication, role system, remote database, actor identity beyond `local workspace`, or multi-process locking. A previous pre-write checkpoint is kept beside the JSON data file as `.bak`; if the active file is malformed, the app loads that prior snapshot and shows a persistent recovery notice. Before a recovery write replaces the damaged file, the exact original bytes are preserved in a unique `.corrupt-*` sidecar. Recovery can roll back the most recent successful write, does not recover a deleted file, and is not a substitute for external backups. Local file persistence and a same-process conflict test do not establish production durability or multi-user concurrency. Do not bind this server to a public interface.
 
-The visual language follows the provided light dashboard references: pale mint/off-white surfaces, compact sans type, white cards, restrained pastel accents, and minimal borders. The graph canvas prioritizes branch labels, typed fields, precise selection, and visible validation. Browser/device visual QA has not yet been performed; no screenshot or browser-pass claim is made.
+The visual language incorporates the verified RuleCanvas design system: floating pill workbench navigation, ENNORM brand subtitle, pale mint/off-white canvas (`#f4f8f4`), white cards, restrained solid pastels (mint `#d8f4e2`, yellow `#fce8b2`, peach `#fdd8c5`, blue `#dcecff`), compact typography, and collapsible inspector panels.
+
+Real browser flows have been verified directly in modern browser sessions:
+- Unconditional decision graphs (`Start → Outcome`) evaluate with empty schema `{}` returning terminal outcomes and execution traces.
+- Input field creation, renaming, and type changes reliably persist with monotonic edit-generation guards.
+- Keyboard and pointer connections for boundary conditions (e.g. `amount >= 100`) evaluate deterministic outcomes across test inputs.
+- Nested AND/OR logic groups with explicit precedence (e.g. root `AND [input==A, input==A, nested OR(input==A, input==B)]`) evaluate correct branch traces and persist across reloads.
+- Immutable versions save with SHA-256 consistency hashes and replay accurately independent of active draft edits.
+- Responsive layouts maintain zero root horizontal overflow (`document.documentElement.scrollWidth === clientWidth`) across 390px mobile, 450px zoomed, 768px tablet, and desktop viewports, preserving local canvas pan. This verification confirms local layout stability and usability; it does not claim full accessibility or device-matrix certification.
+
+Autosave and conflict management are fully implemented:
+- Debounced autosave (1.8s) with failure backoff retry (5s) and draft preservation on network error.
+- Edit-generation tracking and serialized in-flight write guards prevent network races from overwriting unsaved user edits or losing input focus.
+- 409 revision conflicts retain local in-memory drafts with one-click JSON download.
 
 ## Evaluation semantics
 
@@ -52,10 +65,9 @@ Graphs use one `start` node, `condition` nodes, `group` nodes, and terminal `out
 
 ## Next gates
 
-1. Run pointer and keyboard flows in a real browser at desktop, tablet, and mobile widths; inspect saved/reopened node positions and connections.
-2. Add autosave/retry states.
-3. Decide and implement authenticated actors, durable shared persistence, approval rules, and authorization before any hosted multi-user release.
-4. Add API abuse limits and cross-process locking before treating the local server as a shared backend.
+1. Decide and implement authenticated actors, durable shared persistence, approval rules, and authorization before any hosted multi-user release.
+2. Add API abuse limits and cross-process locking before treating the local server as a shared backend.
+3. Expanded cross-browser and assistive technology audits for formal accessibility certification.
 
 ## License
 

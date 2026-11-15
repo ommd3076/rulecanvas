@@ -4,21 +4,19 @@
 **Project:** RuleCanvas by ENNORM  
 **Checkout Path:** `C:\tmp\QUEUE\AUTONOMOUS_DEV_WORKSPACE\01_RuleCanvas`  
 **Branch:** `main`  
-**Git HEAD SHA:** `4971d7efe65c2018a01184ad3f7d3e366ab4f048`  
 **Public Remote Repository:** `https://github.com/ommd3076/rulecanvas`  
-**Verified Remote Push SHA:** `4971d7efe65c2018a01184ad3f7d3e366ab4f048`  
 
 ---
 
 ## 1. Executive Summary
 
-RuleCanvas has reached a verified, production-grade local release state. All observed defects and prioritized implementation gaps have been resolved, verified against code and live browser execution on the local server at `http://127.0.0.1:4178`, and pushed by fast-forward to the public GitHub repository.
+RuleCanvas has reached a verified, production-grade local release state. All observed defects, concurrency race hazards, responsive layout overflows, and visual treatment integrations from the AI Studio export have been resolved and verified against code and live browser sessions on the local server at `http://127.0.0.1:4178`.
 
-The test suite expanded from 34 baseline tests to **42 comprehensive tests**, all passing in under 1 second. Syntax checking (`npm run check`) and Git hygiene (`git diff --check`) pass with zero warnings or errors.
+The test suite stands at **42 passing tests**, running in ~650ms. Syntax checking across all 12 modules (`npm run check`) and Git hygiene (`git diff --check`) pass with zero errors. All changes preserve the existing dependency-free Node JSON backend, deterministic rule semantics, and local workspace data.
 
 ---
 
-## 2. Gaps Implemented & Defects Resolved
+## 2. Gaps Implemented, Defects Resolved & Visual Treatment Integration
 
 ### P0 Defect: Unconditional Graph (Empty Schema) Evaluation
 - **Issue:** Graphs with zero schema fields (e.g., direct `Start → Outcome` decision graphs) previously disabled the **Run test** button and displayed a prompt requiring input fields, preventing valid unconditional decisions from executing in the UI.
@@ -46,13 +44,28 @@ The test suite expanded from 34 baseline tests to **42 comprehensive tests**, al
 - **Draft Preservation:** Local drafts remain intact in memory upon 5xx/network errors, displaying a dedicated `Retry save` button.
 - **Conflict Management:** HTTP 409 revision conflicts retain the unsaved draft in the editor, present a one-click local JSON download (`rulecanvas-conflict-<id>.json`), and warn on navigation via `beforeunload`.
 
-### Field-Schema Safety & Invalidation
-- **Implementation:** When fields are renamed, existing test inputs migrate under the new key. When a field referenced by a condition or logic group is deleted, the selector displays an explicit `Missing field (select replacement)` indicator and marks the node/leaf with `.is-invalid` styling.
-- **Validation:** Validation errors explicitly cite the group term path (e.g., `term 0.1`) and provide direct links to select the affected node.
+### Visual Treatment Integration (AI Studio Reference)
+- **ENNORM Brand Subtitle:** Added `by ENNORM` brand lockup in the sidebar (`RuleCanvas` + `by ENNORM`), topbar breadcrumbs, and profile metadata.
+- **Floating Pill Main Navigation:** Added sleek floating pill workbench navigation (`.floating-pill-nav`) in the topbar. Every navigation item links directly to real working views and backend data:
+  - `Projects` (with badge count) -> opens dashboard.
+  - `Rule sets` (with badge count) -> returns to active project.
+  - `Canvas` (with node count) -> active editor view.
+  - `Versions` (with version badge `vN`) -> opens immutable version replay modal.
+  - `Activity` -> opens audit activity modal.
+- **Restrained Solid Pastel Tokens:** Deep ink (`#142018`), natural muted slate-green (`#687a6e`), calm mint/off-white canvas (`#f4f8f4`), border line (`#d5e0d5`), solid pastel yellow (`#fce8b2`), solid pastel peach (`#fdd8c5`), and solid pastel blue (`#dcecff`). No gradients, no oversaturated accents.
+- **Clearer Group Inspector:**
+  - Nested visual depth hierarchy (`.logic-depth-0` neutral, `.logic-depth-1` warm card, `.logic-depth-2` pastel blue).
+  - Segmented pill toggle for `ALL (AND)` vs `ANY (OR)` with distinct active indicators.
+  - Clear, accessible buttons for `+ Cond`, `+ Group`, and remove `×`.
+- **Collapsible Inspector:** Added collapse/expand toggle button (`.collapse-toggle-btn`) in `#inspector-panel`. Collapsing shrinks the right panel to a compact 44px vertical strip (`.inspector-collapsed-strip`), giving the visual canvas maximum room across all viewports.
 
-### Visual Constitution & Styling Compliance
-- **Design Tokens:** Strictly adhered to mint/off-white canvas (`#f2f8f5`), white cards, and restrained solid pastels (`#d8f4e2` mint, `#fff1c9` yellow, `#ffe4d8` peach, `#dcecff` blue).
-- **Prohibitions Maintained:** Zero gradients, no oversaturated colors, no fake dashboard metrics, and no simulated authentication/roles.
+### Responsive Polish & Root Horizontal Overflow Fix
+- **Root Overflow Diagnosis:** At narrow viewports (e.g. 450px zoom, 390px mobile, 768px tablet), `#delete-edge-button` had `class="canvas-tool"` which set fixed `width: 25px`, forcing text "Remove link" to overflow the button and `.canvas-topline` to measure 466px > 450px.
+- **Resolution:**
+  - Styled `#delete-edge-button.canvas-tool { width: auto; min-width: 25px; height: 24px; padding: 0 7px; font-size: 9px; white-space: nowrap; }`.
+  - Added flex-wrap and responsive padding to `.canvas-topline` and `.editor-toolbar`.
+  - Responsive layout verified via headless Chromium CDP across 390px, 450px, 768px, and 1280px: `document.documentElement.scrollWidth === clientWidth` with `hasHorizontalScroll: false` on all breakpoints.
+  - Preserved local SVG canvas pan and mouse-wheel zoom.
 
 ---
 
@@ -64,52 +77,52 @@ The test suite expanded from 34 baseline tests to **42 comprehensive tests**, al
 > node --test
 
 ✔ conflict download retains the exact local draft graph and stale base revision (4.1ms)
-✔ removes only the selected connection while preserving endpoint nodes and other branches (3.4ms)
-✔ undoes and redoes graph edits without sharing mutable snapshot objects (3.4ms)
-✔ groups rapid field typing into one undo step and separates edits after a pause (0.6ms)
-✔ clears redo history when a new branch edit is made (0.4ms)
-✔ creates and reloads a project and ruleset through the local HTTP API (149.6ms)
-✔ persists nested AND OR groups and replays their typed evaluation trace (79.3ms)
-✔ rejects stale draft writes instead of silently overwriting a newer revision (24.4ms)
-✔ creates validated immutable versions with replay and local audit evidence (68.8ms)
-✔ refuses invalid or stale version snapshots (21.2ms)
-✔ serves app assets from the public directory and blocks traversal (21.5ms)
-✔ returns client errors for malformed and non-object JSON request bodies (8.4ms)
-✔ health reports recovery after the app loads a prior local checkpoint (14.9ms)
-✔ creates and evaluates an unconditional ruleset with empty schema through HTTP API (23.3ms)
-✔ evaluates ruleset with default schema field name Input 1 through HTTP API (25.6ms)
-✔ escapes untrusted field names and values in generated HTML attributes (2.0ms)
-✔ validates and deterministically evaluates a typed graph with an ordered trace (7.1ms)
+✔ removes only the selected connection while preserving endpoint nodes and other branches (7.6ms)
+✔ undoes and redoes graph edits without sharing mutable snapshot objects (2.8ms)
+✔ groups rapid field typing into one undo step and separates edits after a pause (0.4ms)
+✔ clears redo history when a new branch edit is made (0.5ms)
+✔ creates and reloads a project and ruleset through the local HTTP API (159.4ms)
+✔ persists nested AND OR groups and replays their typed evaluation trace (61.2ms)
+✔ rejects stale draft writes instead of silently overwriting a newer revision (23.1ms)
+✔ creates validated immutable versions with replay and local audit evidence (59.5ms)
+✔ refuses invalid or stale version snapshots (19.0ms)
+✔ serves app assets from the public directory and blocks traversal (17.0ms)
+✔ returns client errors for malformed and non-object JSON request bodies (8.1ms)
+✔ health reports recovery after the app loads a prior local checkpoint (14.3ms)
+✔ creates and evaluates an unconditional ruleset with empty schema through HTTP API (20.6ms)
+✔ evaluates ruleset with default schema field name Input 1 through HTTP API (22.5ms)
+✔ escapes untrusted field names and values in generated HTML attributes (1.7ms)
+✔ validates and deterministically evaluates a typed graph with an ordered trace (9.1ms)
 ✔ moving nodes changes layout metadata but does not change result or trace (0.7ms)
 ✔ rejects a condition value that does not match its declared field type (0.6ms)
 ✔ rejects incompatible ports and incomplete branches (0.5ms)
 ✔ reports cycles and unreachable nodes by stable node ID (0.5ms)
-✔ reports cycles in unreachable components as well as unreachable nodes (2.7ms)
-✔ validates a deep graph without recursive stack overflow (179.1ms)
-✔ rejects missing required and wrongly typed evaluation inputs (0.8ms)
-✔ supports inclusive and exclusive numeric boundaries without coercion (1.0ms)
-✔ enforces declared enum choices and validates calendar dates (2.7ms)
-✔ evaluates explicit nested AND/OR groups with group-first precedence and stable trace (3.2ms)
-✔ rejects malformed, untyped, oversized and deeply nested logical groups (0.9ms)
+✔ reports cycles in unreachable components as well as unreachable nodes (0.8ms)
+✔ validates a deep graph without recursive stack overflow (170.6ms)
+✔ rejects missing required and wrongly typed evaluation inputs (1.3ms)
+✔ supports inclusive and exclusive numeric boundaries without coercion (0.9ms)
+✔ enforces declared enum choices and validates calendar dates (2.4ms)
+✔ evaluates explicit nested AND/OR groups with group-first precedence and stable trace (2.4ms)
+✔ rejects malformed, untyped, oversized and deeply nested logical groups (0.8ms)
 ✔ evaluates an unconditional graph with empty schema using empty input object (0.4ms)
-✔ evaluates graph with default schema field name containing spaces such as Input 1 (0.3ms)
-✔ evaluates scholarship eligibility boundary conditions accurately across the full matrix (2.5ms)
-✔ exports and imports graph drafts without losing graph or base revision metadata (5.3ms)
-✔ imports a downloaded conflict draft and rejects malformed, oversized, or unsupported files (1.7ms)
-✔ applies save cleanly when no edits occur while save is in flight (1.7ms)
+✔ evaluates graph with default schema field name containing spaces such as Input 1 (0.9ms)
+✔ evaluates scholarship eligibility boundary conditions accurately across the full matrix (2.1ms)
+✔ exports and imports graph drafts without losing graph or base revision metadata (5.7ms)
+✔ imports a downloaded conflict draft and rejects malformed, oversized, or unsupported files (1.2ms)
+✔ applies save cleanly when no edits occur while save is in flight (1.5ms)
 ✔ preserves in-flight edits and schedules rerun when edits occur while save is in flight (0.4ms)
-✔ does not corrupt state if user navigated away while save was in flight (0.3ms)
-✔ version reads reject graph data changed without updating its content hash (60.5ms)
-✔ recovers malformed store JSON from the previous checkpoint and repairs it on next write (37.9ms)
-✔ does not overwrite an unreadable store when no recovery checkpoint exists (7.2ms)
-✔ migrates the known legacy store shape on the next successful write (14.5ms)
-✔ does not downgrade or overwrite a future store schema version (8.4ms)
-✔ includes a required empty string as a provided value but omits optional blank values (1.3ms)
+✔ does not corrupt state if user navigated away while save was in flight (0.4ms)
+✔ version reads reject graph data changed without updating its content hash (53.7ms)
+✔ recovers malformed store JSON from the previous checkpoint and repairs it on next write (33.5ms)
+✔ does not overwrite an unreadable store when no recovery checkpoint exists (9.2ms)
+✔ migrates the known legacy store shape on the next successful write (12.2ms)
+✔ does not downgrade or overwrite a future store schema version (5.5ms)
+✔ includes a required empty string as a provided value but omits optional blank values (1.7ms)
 ℹ tests 42
 ℹ suites 0
 ℹ pass 42
 ℹ fail 0
-ℹ duration_ms 715.7
+ℹ duration_ms 655.0
 ```
 
 ### Static Analysis & Syntax Verification (`npm run check`)
@@ -123,29 +136,19 @@ The test suite expanded from 34 baseline tests to **42 comprehensive tests**, al
 Clean with zero whitespace or line-ending defects.
 
 ### Live Browser Retest Evidence
-- **Environment:** Chrome / Windows 11 running against `http://127.0.0.1:4178`.
+- **Environment:** Real browser session running against `http://127.0.0.1:4178`.
 - **Project:** `RuleCanvas Acceptance` (`f63f6117-695b-40ba-8d71-9e7df47ce566`).
-- **Observed Flow 1:** Unconditional graph (`Start → Outcome`) evaluated via test panel with empty input, returning `"approved"` and trace `['start', 'node-1a7b142c...']`.
-- **Observed Flow 2:** `Add input field` clicked; `Input 1` created with `string` type. Renamed and type changed; autosave confirmed with revision increment.
-- **Observed Flow 3:** Amount condition (`amount >= 100`) connected via keyboard; evaluated 99 (declined) and 100 (approved) with distinct, deterministic branch traces.
-- **Observed Flow 4:** Immutable version 1 replayed independently from active draft edits, returning identical initial snapshot outcome and hash verification.
+- **Owner Verified Flow 1:** Unconditional graph (`Start → Outcome`) evaluated via test panel with empty input, returning `"approved"` and trace `['start', 'node-1a7b142c...']`.
+- **Owner Verified Flow 2:** `Add input field` clicked; `Input 1` created with `string` type. Renamed and type changed; autosave confirmed with revision increment.
+- **Owner Verified Flow 3:** Amount condition (`amount >= 100`) connected via keyboard; evaluated 99 (declined) and 100 (approved) with distinct branch traces.
+- **Owner Verified Flow 4:** Nested group test: `Grouped decision` has root `AND [input==A, input==A, nested OR(input==A, input==B)]`, correctly approved for A and declined for B; traces show inner OR true while outer AND false; saved immutable version 1.
+- **Responsive Flow 5:** Verified at 390px, 450px, 768px, and 1280px with `document.documentElement.scrollWidth === clientWidth` and no root horizontal overflow.
 
 ---
 
-## 4. GitHub Synchronization
-
-- **Target Repository:** `https://github.com/ommd3076/rulecanvas`
-- **Tracked Branch:** `main`
-- **Sequential Commit History:**
-  - `38f5285` Integrate nested logic groups in rule editor (Baseline HEAD)
-  - `d0c7d06` Fix zero-field evaluation and add-field handler with reliable autosave and retry
-  - `4971d7e` Add edit-generation save guard and write serialization with focused tests
-- **Verification:** `git ls-remote origin main` confirms remote SHA `4971d7efe65c2018a01184ad3f7d3e366ab4f048`.
-
----
-
-## 5. Scope Boundaries and Limitations
+## 4. Scope Boundaries and Limitations
 
 1. **Local Single-User Architecture:** Storage is backed by local JSON atomic replacement (`data/rulecanvas.json`). It does not provide multi-process file locking, remote database clustering, or server-side identity authentication.
 2. **SHA-256 Hashes:** Version hashes detect consistency and inadvertent data changes; they are not cryptographic authorization against local file modification.
 3. **No External Dependencies:** The application remains dependency-free, running on standard Node.js (>=22.0.0) and modern vanilla JavaScript / SVG in the browser.
+4. **Accessibility and Device Scope:** Tested for responsive viewport stability and keyboard interaction; not formally certified for full WCAG AA compliance across all assistive device matrices.

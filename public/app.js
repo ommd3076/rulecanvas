@@ -11,6 +11,7 @@ const toast = document.querySelector('#toast');
 const state = {
   projects: [], project: null, ruleset: null, graph: null, revision: 0,
   editGeneration: 0,
+  inspectorCollapsed: false,
   view: 'dashboard', selectedNodeId: null, selectedEdgeId: null, dirty: false, connectionSource: null,
   recovered: false,
   connectionPointer: null, drag: null, zoom: 1, offset: { x: 0, y: 0 },
@@ -339,18 +340,98 @@ function render() {
   else renderEditor();
 }
 
+function renderFloatingPillNav() {
+  const isDashboard = state.view === 'dashboard';
+  const isProject = state.view === 'project';
+  const isEditor = state.view === 'editor';
+
+  const navItems = [
+    { id: 'projects', label: 'Projects', action: 'dashboard', count: state.projects?.length, active: isDashboard }
+  ];
+  if (state.project) {
+    navItems.push({
+      id: 'rulesets',
+      label: 'Rule sets',
+      action: 'back-project',
+      count: state.project.rulesets?.length,
+      active: isProject
+    });
+  }
+  if (isEditor && state.ruleset) {
+    navItems.push({
+      id: 'canvas',
+      label: 'Canvas',
+      action: 'stay-canvas',
+      count: state.graph ? `${state.graph.nodes.length} nodes` : undefined,
+      active: true
+    });
+    navItems.push({
+      id: 'versions',
+      label: 'Versions',
+      action: 'versions',
+      count: `v${state.revision}`,
+      active: false
+    });
+  }
+  if (state.project) {
+    navItems.push({
+      id: 'activity',
+      label: 'Activity',
+      action: 'activity',
+      count: undefined,
+      active: false
+    });
+  }
+
+  return `<nav class="floating-pill-nav" aria-label="Workbench navigation">
+    ${navItems.map((item) => `
+      <button type="button" class="pill-nav-item ${item.active ? 'is-active' : ''}" data-action="${item.action}" title="${escapeHtml(item.label)}">
+        <span>${escapeHtml(item.label)}</span>
+        ${item.count !== undefined ? `<span class="pill-nav-badge">${escapeHtml(String(item.count))}</span>` : ''}
+      </button>
+    `).join('')}
+  </nav>`;
+}
+
 function shell(content, active = 'projects') {
   return `<div class="app-shell">
     <aside class="sidebar">
-      <button class="brand" data-action="dashboard" aria-label="RuleCanvas home"><span class="brand-mark">R</span><span>RuleCanvas</span></button>
+      <button class="brand" data-action="dashboard" aria-label="RuleCanvas home">
+        <span class="brand-mark">R</span>
+        <span class="brand-text">
+          <span class="brand-name">RuleCanvas</span>
+          <span class="brand-subtitle">by ENNORM</span>
+        </span>
+      </button>
       <div class="workspace-label">WORKSPACE</div>
       <nav class="side-nav" aria-label="Main navigation">
-        <button class="nav-item ${active === 'projects' ? 'is-active' : ''}" data-action="dashboard"><span class="nav-icon">▦</span>Projects</button>
-        <button class="nav-item" data-action="dashboard"><span class="nav-icon">◷</span>Recent</button>
+        <button class="nav-item ${active === 'projects' && state.view === 'dashboard' ? 'is-active' : ''}" data-action="dashboard"><span class="nav-icon">▦</span>Projects</button>
+        ${state.project ? `<button class="nav-item ${state.view === 'project' ? 'is-active' : ''}" data-action="back-project"><span class="nav-icon">◫</span>Rule sets</button>` : ''}
+        ${state.view === 'editor' ? `<button class="nav-item is-active" data-action="stay-canvas"><span class="nav-icon">◇</span>Canvas</button>` : ''}
+        ${state.project ? `<button class="nav-item" data-action="activity"><span class="nav-icon">◷</span>Activity</button>` : ''}
       </nav>
-      <div class="sidebar-foot"><span class="avatar">R</span><span class="profile-text"><strong>RuleCanvas</strong><small>Local workspace</small></span><span class="more-dots">•••</span></div>
+      <div class="sidebar-foot"><span class="avatar">R</span><span class="profile-text"><strong>RuleCanvas</strong><small>by ENNORM · Local</small></span><span class="more-dots">•••</span></div>
     </aside>
-    <main class="main-area"><header class="topbar"><div class="breadcrumbs"><span>Workspace</span><span class="crumb-divider">/</span><strong>${state.view === 'dashboard' ? 'Projects' : escapeHtml(state.project?.name)}</strong></div><div class="topbar-actions"><span class="local-badge"><i></i> Local data</span><button class="icon-button" aria-label="Help" title="Help" data-action="help">?</button><span class="avatar avatar-small">R</span></div></header>${state.recovered ? '<div class="recovery-banner" role="alert"><strong>Previous local checkpoint loaded.</strong> The latest saved change may be missing. The damaged file is preserved beside the data file; create or save a project to repair it.</div>' : ''}${content}</main>
+    <main class="main-area">
+      <header class="topbar">
+        <div class="breadcrumbs">
+          <button class="brand-crumb" data-action="dashboard" aria-label="RuleCanvas home">
+            <strong>RuleCanvas</strong>
+            <span class="brand-sub">by ENNORM</span>
+          </button>
+          <span class="crumb-divider">/</span>
+          <strong>${state.view === 'dashboard' ? 'Projects' : escapeHtml(state.project?.name)}</strong>
+        </div>
+        ${renderFloatingPillNav()}
+        <div class="topbar-actions">
+          <span class="local-badge"><i></i> Local data</span>
+          <button class="icon-button" aria-label="Help" title="Help" data-action="help">?</button>
+          <span class="avatar avatar-small">R</span>
+        </div>
+      </header>
+      ${state.recovered ? '<div class="recovery-banner" role="alert"><strong>Previous local checkpoint loaded.</strong> The latest saved change may be missing. The damaged file is preserved beside the data file; create or save a project to repair it.</div>' : ''}
+      ${content}
+    </main>
   </div>`;
 }
 
@@ -470,7 +551,8 @@ function renderGroupTerm(term, path, depth = 0, budget = { remaining: 2048 }) {
   if (term.type === 'group') {
     const terms = Array.isArray(term.terms) ? term.terms : [];
     const children = terms.slice(0, 128).map((child, index) => renderGroupTerm(child, path ? `${path}.${index}` : String(index), depth + 1, budget)).join('');
-    return `<div class="logic-term logic-subgroup"><div class="logic-term-heading"><select class="form-control logic-operator" data-group-path="${path}" data-group-prop="operator" aria-label="Nested group operator"><option value="and" ${term.operator === 'and' ? 'selected' : ''}>All (AND)</option><option value="or" ${term.operator === 'or' ? 'selected' : ''}>Any (OR)</option></select><div class="logic-term-actions"><button class="tiny-remove" data-group-action="add-condition" data-group-path="${path}" aria-label="Add condition to nested group">+</button><button class="tiny-remove" data-group-action="add-group" data-group-path="${path}" aria-label="Add nested group">⊞</button><button class="tiny-remove" data-group-action="remove-term" data-group-path="${path}" aria-label="Remove nested group" ${!groupTermRemovable(path) ? 'disabled' : ''}>×</button></div></div><div class="logic-term-children">${children}${terms.length > 128 ? '<p class="field-hint">This group exceeds the 128-term editor limit.</p>' : ''}</div></div>`;
+    const depthClass = `logic-depth-${depth % 3}`;
+    return `<div class="logic-term logic-subgroup ${depthClass}"><div class="logic-term-heading"><span class="group-depth-badge">${depth === 0 ? 'ROOT' : `DEPTH ${depth}`}</span><div class="operator-toggle-group mini"><button type="button" class="operator-toggle-btn ${term.operator === 'and' ? 'is-active is-and' : ''}" data-group-set-op="and" data-group-path="${path}">AND</button><button type="button" class="operator-toggle-btn ${term.operator === 'or' ? 'is-active is-or' : ''}" data-group-set-op="or" data-group-path="${path}">OR</button></div><select class="form-control logic-operator" data-group-path="${path}" data-group-prop="operator" aria-label="Nested group operator"><option value="and" ${term.operator === 'and' ? 'selected' : ''}>All (AND)</option><option value="or" ${term.operator === 'or' ? 'selected' : ''}>Any (OR)</option></select><div class="logic-term-actions"><button type="button" class="tiny-remove button-group-add" data-group-action="add-condition" data-group-path="${path}" aria-label="Add condition to nested group">+ Cond</button><button type="button" class="tiny-remove button-group-add group-sub-add" data-group-action="add-group" data-group-path="${path}" aria-label="Add nested group">+ Group</button><button type="button" class="tiny-remove group-remove-btn" data-group-action="remove-term" data-group-path="${path}" aria-label="Remove nested group" ${!groupTermRemovable(path) ? 'disabled' : ''}>×</button></div></div><div class="logic-term-children">${children}${terms.length > 128 ? '<p class="field-hint">This group exceeds the 128-term editor limit.</p>' : ''}</div></div>`;
   }
   const fieldExists = state.graph.schema.some((item) => item.id === term.fieldId);
   const field = fieldExists ? state.graph.schema.find((item) => item.id === term.fieldId) : null;
@@ -552,7 +634,24 @@ function renderGroupInspector(node) {
   const terms = Array.isArray(node.terms) ? node.terms : [];
   const budget = { remaining: 2048 };
   const rendered = terms.slice(0, 128).map((term, index) => renderGroupTerm(term, String(index), 0, budget)).join('');
-  return `<div class="inspector-content"><div class="selected-label"><span class="kind-dot kind-condition"></span>LOGIC GROUP</div><h3>Combine conditions</h3><p class="inspector-copy">Each group applies its operator to the listed terms. Nest groups to set explicit AND/OR precedence.</p><label class="form-label" for="root-group-operator">Group operator</label><select id="root-group-operator" class="form-control"><option value="and" ${node.operator === 'and' ? 'selected' : ''}>All terms (AND)</option><option value="or" ${node.operator === 'or' ? 'selected' : ''}>Any term (OR)</option></select><div class="logic-group-terms">${rendered}${terms.length > 128 ? '<p class="field-hint">This group exceeds the 128-term editor limit.</p>' : ''}</div><div class="logic-add-actions"><button class="button button-outline" data-group-action="add-condition" data-group-path="">Add condition</button><button class="button button-outline" data-group-action="add-group" data-group-path="">Add nested group</button></div><div class="branch-note"><span class="branch-yes-dot"></span>Yes follows the true port <span class="branch-no-dot"></span>No follows the false port</div><button class="button button-danger-soft button-wide" data-action="delete-node">Delete node</button></div>`;
+  return `<div class="inspector-content">
+    <div class="selected-label"><span class="kind-dot kind-condition"></span>LOGIC GROUP</div>
+    <h3>Combine conditions</h3>
+    <p class="inspector-copy">Each group applies its operator to the listed terms. Nest groups to set explicit AND/OR precedence.</p>
+    <label class="form-label" for="root-group-operator">Group operator</label>
+    <div class="operator-toggle-group">
+      <button type="button" class="operator-toggle-btn ${node.operator === 'and' ? 'is-active is-and' : ''}" data-group-set-op="and" data-group-path="" aria-label="Set root group operator to ALL (AND)">ALL (AND)</button>
+      <button type="button" class="operator-toggle-btn ${node.operator === 'or' ? 'is-active is-or' : ''}" data-group-set-op="or" data-group-path="" aria-label="Set root group operator to ANY (OR)">ANY (OR)</button>
+    </div>
+    <select id="root-group-operator" class="form-control sr-only" aria-label="Root group operator"><option value="and" ${node.operator === 'and' ? 'selected' : ''}>All terms (AND)</option><option value="or" ${node.operator === 'or' ? 'selected' : ''}>Any term (OR)</option></select>
+    <div class="logic-group-terms">${rendered}${terms.length > 128 ? '<p class="field-hint">This group exceeds the 128-term editor limit.</p>' : ''}</div>
+    <div class="logic-add-actions">
+      <button class="button button-outline" data-group-action="add-condition" data-group-path="">+ Add condition</button>
+      <button class="button button-outline" data-group-action="add-group" data-group-path="">+ Add nested group</button>
+    </div>
+    <div class="branch-note"><span class="branch-yes-dot"></span>Yes follows the true port <span class="branch-no-dot"></span>No follows the false port</div>
+    <button class="button button-danger-soft button-wide" data-action="delete-node">Delete node</button>
+  </div>`;
 }
 
 function renderInspector() {
@@ -618,10 +717,10 @@ function renderValidation() {
 function renderEditor() {
   app.innerHTML = shell(`<section class="editor-page">
     <div class="editor-toolbar"><div class="editor-title"><button class="back-icon" data-action="back-project" aria-label="Back to project">←</button><div><div class="editor-project-label">${escapeHtml(state.project.name)} <span>›</span></div><input id="ruleset-name" aria-label="Rule set name" value="${escapeHtml(state.ruleset.name)}" maxlength="80"/></div></div><div class="editor-actions"><button id="undo-button" class="history-button" data-action="undo" aria-label="Undo" title="Undo (Ctrl+Z)" disabled>↶</button><button id="redo-button" class="history-button" data-action="redo" aria-label="Redo" title="Redo (Ctrl+Y)" disabled>↷</button><span id="save-status" class="save-status" data-state="${state.dirty ? 'unsaved' : 'saved'}">${state.dirty ? 'Unsaved changes' : `Saved · v${state.revision}`}</span><button id="validate-button" class="button button-outline" data-action="validate">Validate</button><button class="button button-outline" data-action="versions">Versions</button><button class="button button-outline" data-action="import-draft">Import JSON</button><button class="button button-outline" data-action="export-draft">Export JSON</button><button id="version-button" class="button button-primary" data-action="create-version" ${state.dirty ? 'disabled' : ''}>Save version</button><button id="save-button" class="button button-primary" data-action="save" ${state.dirty ? '' : 'disabled'}>Save draft</button><input id="import-draft-file" class="file-input-hidden" type="file" accept="application/json,.json" aria-label="Choose a RuleCanvas draft JSON file"/></div></div>
-    <div class="editor-workspace">
+    <div class="editor-workspace ${state.inspectorCollapsed ? 'inspector-collapsed' : ''}">
       <aside class="editor-left"><div class="panel-heading"><div><h3>Build</h3><p>Drag concepts onto the canvas</p></div></div><div class="palette-group"><span class="palette-label">FLOW</span><button class="palette-card" draggable="true" data-add-node="condition"><span class="palette-symbol palette-condition">?</span><span><strong>Condition</strong><small>Compare an input value</small></span><span class="palette-plus">+</span></button><button class="palette-card" draggable="true" data-add-node="group"><span class="palette-symbol palette-group-symbol">∧</span><span><strong>Logic group</strong><small>Combine tests using AND / OR</small></span><span class="palette-plus">+</span></button><button class="palette-card" draggable="true" data-add-node="outcome"><span class="palette-symbol palette-outcome">✓</span><span><strong>Outcome</strong><small>Return a decision</small></span><span class="palette-plus">+</span></button></div>${renderSchema()}<div class="left-help"><span>⌘</span><span>Drag a node onto the canvas. Connect output ports to inputs; keyboard users can select an output then an input.</span></div></aside>
       <section class="canvas-area"><div class="canvas-topline"><div><strong>Decision canvas</strong><span>${state.graph.nodes.length} nodes · ${state.graph.edges.length} connections</span></div><div class="canvas-tools"><button class="canvas-tool" data-action="zoom-out" aria-label="Zoom out">−</button><span class="zoom-label">${Math.round(state.zoom * 100)}%</span><button class="canvas-tool" data-action="zoom-in" aria-label="Zoom in">+</button><button class="canvas-tool fit-tool" data-action="fit" title="Fit graph">Fit</button><button id="delete-edge-button" class="canvas-tool" data-action="delete-edge" title="Select a connection to remove" aria-label="Delete selected connection" ${state.selectedEdgeId ? '' : 'disabled'}>Remove link</button></div></div><div class="canvas-viewport" id="canvas-viewport">${renderCanvasMarkup()}<div class="canvas-hint"><span class="hint-key">Esc</span> Cancel connection <span class="hint-divider">·</span> Drag canvas with space</div></div>${renderValidation()}</section>
-      <aside class="editor-right"><div id="inspector-panel" class="inspector-panel"><div class="panel-heading"><div><h3>Properties</h3><p>Edit the selected node</p></div></div>${renderInspector()}</div>${renderTestPanel()}</aside>
+      <aside class="editor-right ${state.inspectorCollapsed ? 'is-collapsed' : ''}"><div id="inspector-panel" class="inspector-panel">${state.inspectorCollapsed ? `<div class="inspector-collapsed-strip"><button class="collapse-toggle-btn" data-action="toggle-inspector" aria-label="Expand inspector panel" title="Expand inspector panel">⇤</button><span class="inspector-vertical-title">PROPERTIES</span></div>` : `<div class="panel-heading"><div><h3>Properties</h3><p>Edit the selected node</p></div><button class="collapse-toggle-btn" data-action="toggle-inspector" aria-label="Collapse inspector panel" title="Collapse inspector panel">⇥</button></div>${renderInspector()}`}</div>${state.inspectorCollapsed ? '' : renderTestPanel()}</aside>
     </div>
   </section>`);
   attachCanvasEvents();
@@ -875,7 +974,12 @@ function renderCanvas() {
 
 function renderInspectorPanel() {
   const panel = document.querySelector('#inspector-panel');
-  if (panel) panel.innerHTML = `<div class="panel-heading"><div><h3>Properties</h3><p>Edit the selected node</p></div></div>${renderInspector()}`;
+  if (!panel) return;
+  if (state.inspectorCollapsed) {
+    panel.innerHTML = `<div class="inspector-collapsed-strip"><button class="collapse-toggle-btn" data-action="toggle-inspector" aria-label="Expand inspector panel" title="Expand inspector panel">⇤</button><span class="inspector-vertical-title">PROPERTIES</span></div>`;
+  } else {
+    panel.innerHTML = `<div class="panel-heading"><div><h3>Properties</h3><p>Edit the selected node</p></div><button class="collapse-toggle-btn" data-action="toggle-inspector" aria-label="Collapse inspector panel" title="Collapse inspector panel">⇥</button></div>${renderInspector()}`;
+  }
 }
 
 function updateZoomLabel() {
@@ -1059,6 +1163,33 @@ app.addEventListener('click', async (event) => {
   const removeFieldButton = event.target.closest('[data-remove-field]');
   const focusNodeButton = event.target.closest('[data-focus-node]');
   const groupActionButton = event.target.closest('[data-group-action]');
+  const groupOpBtn = event.target.closest('[data-group-set-op]');
+  if (groupOpBtn) {
+    const op = groupOpBtn.dataset.groupSetOp;
+    const path = groupOpBtn.dataset.groupPath;
+    const node = state.graph?.nodes?.find((item) => item.id === state.selectedNodeId);
+    if (node && node.type === 'group') {
+      if (!path) {
+        if (node.operator !== op) {
+          checkpointHistory();
+          node.operator = op;
+          state.result = null;
+          markDirty();
+          render();
+        }
+      } else {
+        const target = groupPath(path);
+        if (target && target.term && target.term.type === 'group' && target.term.operator !== op) {
+          checkpointHistory();
+          target.term.operator = op;
+          state.result = null;
+          markDirty();
+          render();
+        }
+      }
+    }
+    return;
+  }
   if (projectButton) { await openProject(projectButton.dataset.project); return; }
   if (rulesetButton) { await openRuleset(rulesetButton.dataset.ruleset); return; }
   if (addNodeButton) { newNode(addNodeButton.dataset.addNode); return; }
@@ -1073,6 +1204,12 @@ app.addEventListener('click', async (event) => {
   if (!action) return;
   try {
     if (action === 'add-field') addField();
+    else if (action === 'toggle-inspector') {
+      state.inspectorCollapsed = !state.inspectorCollapsed;
+      render();
+    } else if (action === 'stay-canvas') {
+      // Already viewing editor canvas
+    }
     else if (action === 'retry-save') await saveDraft();
     else if (action === 'dashboard') {
       if (!confirmDiscard()) return;
