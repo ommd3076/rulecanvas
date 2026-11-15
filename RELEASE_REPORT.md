@@ -46,29 +46,19 @@ The test suite stands at **42 passing tests**, running in ~650ms. Syntax checkin
 - **Draft Preservation:** Local drafts remain intact in memory upon 5xx/network errors, displaying a dedicated `Retry save` button.
 - **Conflict Management:** HTTP 409 revision conflicts retain the unsaved draft in the editor, present a one-click local JSON download (`rulecanvas-conflict-<id>.json`), and warn on navigation via `beforeunload`.
 
-### Visual Treatment Integration (AI Studio Reference)
-- **ENNORM Brand Subtitle:** Added `by ENNORM` brand lockup in the sidebar (`RuleCanvas` + `by ENNORM`), topbar breadcrumbs, and profile metadata.
-- **Floating Pill Main Navigation:** Added floating pill workbench navigation (`.floating-pill-nav`) in the topbar. Every navigation item links directly to real working views and backend data:
-  - `Projects` (with badge count) -> opens dashboard.
-  - `Rule sets` (with badge count) -> returns to active project.
-  - `Canvas` (with node count) -> active editor view.
-  - `Versions` (with version badge `vN`) -> opens immutable version replay modal.
-  - `Activity` -> opens audit activity modal.
-- **Restrained Solid Pastel Tokens:** Deep ink (`#142018`), natural muted slate-green (`#687a6e`), calm mint/off-white canvas (`#f4f8f4`), border line (`#d5e0d5`), solid pastel yellow (`#fce8b2`), solid pastel peach (`#fdd8c5`), and solid pastel blue (`#dcecff`). No gradients, no oversaturated accents.
-- **Clearer Group Inspector:**
-  - Nested visual depth hierarchy (`.logic-depth-0` neutral, `.logic-depth-1` warm card, `.logic-depth-2` pastel blue).
-  - Segmented pill toggle for `ALL (AND)` vs `ANY (OR)` with distinct active indicators.
-  - Clear, accessible buttons for `+ Cond`, `+ Group`, and remove `×`.
-- **Collapsible Inspector:** Added collapse/expand toggle button (`.collapse-toggle-btn`) in `#inspector-panel`. Collapsing shrinks the right panel to a compact 44px vertical strip (`.inspector-collapsed-strip`), giving the visual canvas maximum room across all viewports.
-
-### Responsive Polish & Root Horizontal Overflow Fix
-- **Root Overflow Finding:** At actual CSS viewport 450px with browser zoom, the owner identified `document.scrollWidth 466 > clientWidth 450`.
-- **Diagnosis:** `#delete-edge-button` had `class="canvas-tool"`, where `.canvas-tool` had fixed `width: 25px;`. The button text "Remove link" overflowed out of the button, and `.canvas-topline` lacked flex wrapping, causing it to measure 466px wide.
-- **Resolution:**
-  - Styled `#delete-edge-button.canvas-tool { width: auto; min-width: 25px; height: 24px; padding: 0 7px; font-size: 9px; white-space: nowrap; }`.
-  - Added flex-wrap and responsive padding to `.canvas-topline` and `.editor-toolbar`.
-  - Verified via headless Chromium CDP: `document.documentElement.scrollWidth === clientWidth` (`hasHorizontalScroll: false`) across **390px**, **450px**, **768px**, and **1280px** viewports without global overflow masking (`overflow-x: hidden` is not applied to html/body).
-  - Preserved local SVG canvas pointer drag pan and mouse-wheel zoom.
+### Decisive Visual Workspace Redesign (AI Studio Reference Integration)
+- **Elimination of Redundant Sidebar & Stacked Toolbars:**
+  - Removed the legacy 238px sidebar that duplicated the top floating pill navigation, freeing up screen width for the decision canvas.
+  - Eliminated the separate secondary `editor-toolbar`, unifying all navigation, breadcrumbs, ruleset title editing, history undo/redo, save status, and actions (`Validate`, `Export`, `Import`, `Save version`, `Save draft`) into a single cohesive, sticky `.top-nav` header.
+- **Three-Zone Workspace Hierarchy:**
+  - *Left Panel (Build & Schema):* 260px wide panel containing draggable/clickable node palette cards (Condition, Logic group, Outcome with distinct solid pastel symbols) and typed Schema editor with type badges (`N`, `S`, `B`, `D`, `E`), inline type selector, and required toggles.
+  - *Center Canvas:* Clean, spacious SVG canvas with geometric dot pattern and top floating toolbar featuring solid pastel quick-add pills (`+ Condition`, `+ Logic group`, `+ Outcome`), node and edge count statistics, zoom controls (`−`, `100%`, `+`, `Fit`), `Remove link`, and inspector toggle. Upgraded SVG cards to 240x130px with solid pastel icon badges, uppercase kind labels, divider rules, and distinct true ("Yes" green) and false ("No" peach) branch ports.
+  - *Right Panel (Inspector & Test Runner):* 310px collapsible drawer featuring properties inspector for selected nodes (with nested AND/OR depth hierarchy and segmented operator pills) and test runner with dynamic schema inputs and step-by-step decision trace list.
+- **Restrained Solid Pastel Design Tokens:** Deep ink (`#142018`), natural muted slate-green (`#647569`), calm mint/off-white canvas (`#f4f8f4`), border lines (`#d5e0d5`), solid pastel yellow (`#fce8b2`), solid pastel purple (`#ede4f7`), solid pastel mint (`#d8f4e2`), solid pastel peach (`#fdd8c5`), and solid pastel blue (`#dcecff`). Strictly no decorative linear or radial gradients.
+- **Responsive Mobile Architecture (<= 768px):**
+  - Segmented 3-tab control on mobile viewports: `[ ◇ Canvas ] [ ▦ Build & Fields ] [ ⚙ Properties & Test ]`. Each tab grants 100% viewport width to its respective zone, preventing cramped multi-row button wrapping and vertical squishing.
+  - Horizontally scrollable action and pill bars preventing mobile header overflow.
+  - Verified via real Edge headless CDP: `document.documentElement.scrollWidth === clientWidth` across **390px** mobile (`scrollWidth 390 == clientWidth 390`), **450px** zoomed, **768px** tablet, and **1280px** desktop with zero overflowing elements.
 
 ---
 

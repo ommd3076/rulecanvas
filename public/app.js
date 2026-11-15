@@ -12,6 +12,7 @@ const state = {
   projects: [], project: null, ruleset: null, graph: null, revision: 0,
   editGeneration: 0,
   inspectorCollapsed: false,
+  mobileTab: 'canvas',
   view: 'dashboard', selectedNodeId: null, selectedEdgeId: null, dirty: false, connectionSource: null,
   recovered: false,
   connectionPointer: null, drag: null, zoom: 1, offset: { x: 0, y: 0 },
@@ -394,42 +395,57 @@ function renderFloatingPillNav() {
 }
 
 function shell(content, active = 'projects') {
-  return `<div class="app-shell">
-    <aside class="sidebar">
-      <button class="brand" data-action="dashboard" aria-label="RuleCanvas home">
-        <span class="brand-mark">R</span>
-        <span class="brand-text">
-          <span class="brand-name">RuleCanvas</span>
-          <span class="brand-subtitle">by ENNORM</span>
-        </span>
-      </button>
-      <div class="workspace-label">WORKSPACE</div>
-      <nav class="side-nav" aria-label="Main navigation">
-        <button class="nav-item ${active === 'projects' && state.view === 'dashboard' ? 'is-active' : ''}" data-action="dashboard"><span class="nav-icon">▦</span>Projects</button>
-        ${state.project ? `<button class="nav-item ${state.view === 'project' ? 'is-active' : ''}" data-action="back-project"><span class="nav-icon">◫</span>Rule sets</button>` : ''}
-        ${state.view === 'editor' ? `<button class="nav-item is-active" data-action="stay-canvas"><span class="nav-icon">◇</span>Canvas</button>` : ''}
-        ${state.project ? `<button class="nav-item" data-action="activity"><span class="nav-icon">◷</span>Activity</button>` : ''}
-      </nav>
-      <div class="sidebar-foot"><span class="avatar">R</span><span class="profile-text"><strong>RuleCanvas</strong><small>by ENNORM · Local</small></span><span class="more-dots">•••</span></div>
-    </aside>
-    <main class="main-area">
-      <header class="topbar">
-        <div class="breadcrumbs">
-          <button class="brand-crumb" data-action="dashboard" aria-label="RuleCanvas home">
-            <strong>RuleCanvas</strong>
-            <span class="brand-sub">by ENNORM</span>
-          </button>
-          <span class="crumb-divider">/</span>
-          <strong>${state.view === 'dashboard' ? 'Projects' : escapeHtml(state.project?.name)}</strong>
+  const isDashboard = state.view === 'dashboard';
+  const isProject = state.view === 'project';
+  const isEditor = state.view === 'editor';
+
+  return `<div class="app-shell-unified">
+    <header class="top-nav">
+      <div class="top-nav-left">
+        <button class="brand" data-action="dashboard" aria-label="RuleCanvas home">
+          <span class="brand-mark">R</span>
+          <span class="brand-text">
+            <span class="brand-name">RuleCanvas</span>
+            <span class="brand-subtitle">by ENNORM</span>
+          </span>
+        </button>
+        <span class="nav-divider" aria-hidden="true">/</span>
+        <div class="nav-trail">
+          ${isDashboard
+            ? '<span class="nav-trail-active">Projects</span>'
+            : isProject
+            ? `<span class="nav-trail-active">${escapeHtml(state.project?.name)}</span>`
+            : `<button class="nav-trail-link" data-action="back-project" title="Back to ${escapeHtml(state.project?.name)}">${escapeHtml(state.project?.name)}</button><span class="nav-trail-sep">›</span><input id="ruleset-name" class="topbar-ruleset-input" value="${escapeHtml(state.ruleset?.name)}" maxlength="80" aria-label="Rule set name" title="Click to rename rule set"/>`
+          }
         </div>
+      </div>
+      <div class="top-nav-center">
         ${renderFloatingPillNav()}
-        <div class="topbar-actions">
-          <span class="local-badge"><i></i> Local data</span>
+      </div>
+      <div class="top-nav-right">
+        ${isEditor ? `
+          <div class="editor-header-actions">
+            <div class="history-actions">
+              <button id="undo-button" class="history-button" data-action="undo" aria-label="Undo" title="Undo (Ctrl+Z)" disabled>↶</button>
+              <button id="redo-button" class="history-button" data-action="redo" aria-label="Redo" title="Redo (Ctrl+Y)" disabled>↷</button>
+            </div>
+            <span id="save-status" class="save-status" data-state="${state.dirty ? 'unsaved' : 'saved'}">${state.dirty ? 'Unsaved changes' : `Saved · v${state.revision}`}</span>
+            <button id="validate-button" class="button button-outline button-sm" data-action="validate" title="Validate graph">Validate</button>
+            <button class="button button-outline button-sm" data-action="export-draft" title="Export draft JSON">Export</button>
+            <button class="button button-outline button-sm" data-action="import-draft" title="Import draft JSON">Import</button>
+            <button id="version-button" class="button button-outline button-sm" data-action="create-version" ${state.dirty ? 'disabled' : ''}>Save version</button>
+            <button id="save-button" class="button button-primary button-sm" data-action="save" ${state.dirty ? '' : 'disabled'}>Save draft</button>
+            <input id="import-draft-file" class="file-input-hidden" type="file" accept="application/json,.json" aria-label="Choose a RuleCanvas draft JSON file"/>
+          </div>
+        ` : `
+          <span class="local-badge"><i class="status-dot"></i> Local workspace</span>
           <button class="icon-button" aria-label="Help" title="Help" data-action="help">?</button>
           <span class="avatar avatar-small">R</span>
-        </div>
-      </header>
-      ${state.recovered ? '<div class="recovery-banner" role="alert"><strong>Previous local checkpoint loaded.</strong> The latest saved change may be missing. The damaged file is preserved beside the data file; create or save a project to repair it.</div>' : ''}
+        `}
+      </div>
+    </header>
+    ${state.recovered ? '<div class="recovery-banner" role="alert"><strong>Previous local checkpoint loaded.</strong> The latest saved change may be missing. The damaged file is preserved beside the data file; create or save a project to repair it.</div>' : ''}
+    <main class="main-content">
       ${content}
     </main>
   </div>`;
@@ -463,11 +479,11 @@ function getNodeLabel(node) {
 }
 
 function outputPort(node, port) {
-  if (node.type === 'start') return { x: node.x + 220, y: node.y + 66 };
-  return { x: node.x + 220, y: node.y + (port === 'true' ? 71 : 105) };
+  if (node.type === 'start') return { x: node.x + 240, y: node.y + 65 };
+  return { x: node.x + 240, y: node.y + (port === 'true' ? 65 : 101) };
 }
 
-function inputPort(node) { return { x: node.x, y: node.y + 66 }; }
+function inputPort(node) { return { x: node.x, y: node.y + 65 }; }
 
 function edgePath(edge) {
   const source = state.graph.nodes.find((node) => node.id === edge.from);
@@ -482,16 +498,11 @@ function edgePath(edge) {
 function renderCanvasMarkup() {
   const edgeSvg = state.graph.edges.map((edge) => {
     const source = state.graph.nodes.find((node) => node.id === edge.from);
-    const labelX = source ? safeSvgNumber(Number(source.x) + 230) : '0';
-    const portOffset = edge.fromPort === 'true' ? 65 : edge.fromPort === 'false' ? 112 : 83;
-    const labelY = source ? safeSvgNumber(Number(source.y) + portOffset) : '0';
-    const label = edge.fromPort === 'true' ? 'Yes' : edge.fromPort === 'false' ? 'No' : '';
-    return `<g class="edge-group${state.selectedEdgeId === edge.id ? ' is-selected' : ''}" data-edge="${escapeHtml(edge.id)}" tabindex="0" role="button" aria-pressed="${state.selectedEdgeId === edge.id}" aria-label="Connection from ${escapeHtml(source ? getNodeLabel(source) : 'missing node')}; select to remove"><path class="edge-path" d="${escapeHtml(edgePath(edge))}" marker-end="url(#arrow)"/><text class="edge-label" x="${escapeHtml(labelX)}" y="${escapeHtml(labelY)}">${label}</text></g>`;
+    return `<g class="edge-group${state.selectedEdgeId === edge.id ? ' is-selected' : ''}" data-edge="${escapeHtml(edge.id)}" tabindex="0" role="button" aria-pressed="${state.selectedEdgeId === edge.id}" aria-label="Connection from ${escapeHtml(source ? getNodeLabel(source) : 'missing node')}; select to remove"><path class="edge-path" d="${escapeHtml(edgePath(edge))}" marker-end="url(#arrow)"/></g>`;
   }).join('');
   const nodeSvg = state.graph.nodes.map((node) => {
     const selected = state.selectedNodeId === node.id;
     const isBranch = node.type === 'condition' || node.type === 'group';
-    const isCondition = node.type === 'condition';
     const subtitle = node.type === 'group'
       ? `${String(node.operator || 'and').toUpperCase()} · ${(node.terms ?? []).length} terms`
       : node.type === 'condition'
@@ -501,17 +512,17 @@ function renderCanvasMarkup() {
     const safeType = ['start', 'condition', 'group', 'outcome'].includes(node.type) ? node.type : 'unknown';
     const className = `graph-node node-${safeType}${selected ? ' is-selected' : ''}`;
     return `<g class="${className}" data-node="${escapeHtml(node.id)}" transform="translate(${escapeHtml(safeSvgNumber(Number(node.x)))} ${escapeHtml(safeSvgNumber(Number(node.y)))})" tabindex="0" role="group" aria-label="${escapeHtml(typeLabel)}: ${escapeHtml(getNodeLabel(node))}">
-      <rect class="node-surface" width="220" height="132" rx="16"/>
-      ${node.type !== 'start' ? `<circle class="port port-in" data-port-kind="in" data-node="${escapeHtml(node.id)}" cx="0" cy="66" r="7" tabindex="0" role="button" aria-label="Connect into ${escapeHtml(getNodeLabel(node))}"/>` : ''}
-      <rect class="node-accent accent-${safeType}" x="16" y="17" width="26" height="26" rx="8"/>
-      <text class="node-glyph" x="29" y="35" text-anchor="middle">${node.type === 'start' ? '↗' : node.type === 'group' ? (node.operator === 'or' ? '∨' : '∧') : node.type === 'condition' ? '?' : '✓'}</text>
-      <text class="node-kind" x="54" y="27">${typeLabel}</text>
-      <text class="node-title" x="54" y="47">${escapeHtml(getNodeLabel(node))}</text>
-      <line class="node-divider" x1="16" y1="66" x2="204" y2="66"/>
-      <text class="node-subtitle" x="16" y="89">${subtitle.length > 29 ? `${subtitle.slice(0, 28)}…` : subtitle}</text>
-      <text class="node-hint" x="16" y="113">${node.type === 'condition' ? escapeHtml(state.graph.schema.find((field) => field.id === node.fieldId)?.type ?? 'input') : node.type === 'group' ? 'Nested logic' : node.type === 'outcome' ? 'Terminal result' : 'Connect to a node'}</text>
-      ${node.type === 'start' ? `<circle class="port port-out" data-port-kind="out" data-node="${escapeHtml(node.id)}" data-port="next" cx="220" cy="66" r="7" tabindex="0" role="button" aria-label="Connect from start"/>` : ''}
-      ${isBranch ? `<circle class="port port-out port-yes" data-port-kind="out" data-node="${escapeHtml(node.id)}" data-port="true" cx="220" cy="71" r="7" tabindex="0" role="button" aria-label="Connect true branch from ${escapeHtml(getNodeLabel(node))}"/><circle class="port port-out port-no" data-port-kind="out" data-node="${escapeHtml(node.id)}" data-port="false" cx="220" cy="105" r="7" tabindex="0" role="button" aria-label="Connect false branch from ${escapeHtml(getNodeLabel(node))}"/><text class="branch-label branch-yes" x="231" y="75">Yes</text><text class="branch-label branch-no" x="231" y="109">No</text>` : ''}
+      <rect class="node-surface" width="240" height="130" rx="14"/>
+      ${node.type !== 'start' ? `<circle class="port port-in" data-port-kind="in" data-node="${escapeHtml(node.id)}" cx="0" cy="65" r="7" tabindex="0" role="button" aria-label="Connect into ${escapeHtml(getNodeLabel(node))}"/>` : ''}
+      <rect class="node-accent accent-${safeType}" x="14" y="14" width="28" height="28" rx="8"/>
+      <text class="node-glyph" x="28" y="33" text-anchor="middle">${node.type === 'start' ? '↗' : node.type === 'group' ? (node.operator === 'or' ? '∨' : '∧') : node.type === 'condition' ? '?' : '✓'}</text>
+      <text class="node-kind" x="50" y="24">${typeLabel}</text>
+      <text class="node-title" x="50" y="40">${escapeHtml(getNodeLabel(node))}</text>
+      <line class="node-divider" x1="14" y1="52" x2="226" y2="52"/>
+      <text class="node-subtitle" x="14" y="76">${subtitle.length > 30 ? `${subtitle.slice(0, 29)}…` : subtitle}</text>
+      <text class="node-hint" x="14" y="98">${node.type === 'condition' ? escapeHtml(state.graph.schema.find((field) => field.id === node.fieldId)?.type ?? 'input') : node.type === 'group' ? 'Nested logic' : node.type === 'outcome' ? 'Terminal result' : 'Connect to a node'}</text>
+      ${node.type === 'start' ? `<circle class="port port-out" data-port-kind="out" data-node="${escapeHtml(node.id)}" data-port="next" cx="240" cy="65" r="7" tabindex="0" role="button" aria-label="Connect from start"/>` : ''}
+      ${isBranch ? `<circle class="port port-out port-yes" data-port-kind="out" data-node="${escapeHtml(node.id)}" data-port="true" cx="240" cy="65" r="7" tabindex="0" role="button" aria-label="Connect true branch from ${escapeHtml(getNodeLabel(node))}"/><circle class="port port-out port-no" data-port-kind="out" data-node="${escapeHtml(node.id)}" data-port="false" cx="240" cy="101" r="7" tabindex="0" role="button" aria-label="Connect false branch from ${escapeHtml(getNodeLabel(node))}"/><text class="branch-label branch-yes" x="252" y="69">Yes</text><text class="branch-label branch-no" x="252" y="105">No</text>` : ''}
     </g>`;
   }).join('');
   let draftLine = '';
@@ -716,11 +727,98 @@ function renderValidation() {
 
 function renderEditor() {
   app.innerHTML = shell(`<section class="editor-page">
-    <div class="editor-toolbar"><div class="editor-title"><button class="back-icon" data-action="back-project" aria-label="Back to project">←</button><div><div class="editor-project-label">${escapeHtml(state.project.name)} <span>›</span></div><input id="ruleset-name" aria-label="Rule set name" value="${escapeHtml(state.ruleset.name)}" maxlength="80"/></div></div><div class="editor-actions"><button id="undo-button" class="history-button" data-action="undo" aria-label="Undo" title="Undo (Ctrl+Z)" disabled>↶</button><button id="redo-button" class="history-button" data-action="redo" aria-label="Redo" title="Redo (Ctrl+Y)" disabled>↷</button><span id="save-status" class="save-status" data-state="${state.dirty ? 'unsaved' : 'saved'}">${state.dirty ? 'Unsaved changes' : `Saved · v${state.revision}`}</span><button id="validate-button" class="button button-outline" data-action="validate">Validate</button><button class="button button-outline" data-action="versions">Versions</button><button class="button button-outline" data-action="import-draft">Import JSON</button><button class="button button-outline" data-action="export-draft">Export JSON</button><button id="version-button" class="button button-primary" data-action="create-version" ${state.dirty ? 'disabled' : ''}>Save version</button><button id="save-button" class="button button-primary" data-action="save" ${state.dirty ? '' : 'disabled'}>Save draft</button><input id="import-draft-file" class="file-input-hidden" type="file" accept="application/json,.json" aria-label="Choose a RuleCanvas draft JSON file"/></div></div>
-    <div class="editor-workspace ${state.inspectorCollapsed ? 'inspector-collapsed' : ''}">
-      <aside class="editor-left"><div class="panel-heading"><div><h3>Build</h3><p>Drag concepts onto the canvas</p></div></div><div class="palette-group"><span class="palette-label">FLOW</span><button class="palette-card" draggable="true" data-add-node="condition"><span class="palette-symbol palette-condition">?</span><span><strong>Condition</strong><small>Compare an input value</small></span><span class="palette-plus">+</span></button><button class="palette-card" draggable="true" data-add-node="group"><span class="palette-symbol palette-group-symbol">∧</span><span><strong>Logic group</strong><small>Combine tests using AND / OR</small></span><span class="palette-plus">+</span></button><button class="palette-card" draggable="true" data-add-node="outcome"><span class="palette-symbol palette-outcome">✓</span><span><strong>Outcome</strong><small>Return a decision</small></span><span class="palette-plus">+</span></button></div>${renderSchema()}<div class="left-help"><span>⌘</span><span>Drag a node onto the canvas. Connect output ports to inputs; keyboard users can select an output then an input.</span></div></aside>
-      <section class="canvas-area"><div class="canvas-topline"><div><strong>Decision canvas</strong><span>${state.graph.nodes.length} nodes · ${state.graph.edges.length} connections</span></div><div class="canvas-tools"><button class="canvas-tool" data-action="zoom-out" aria-label="Zoom out">−</button><span class="zoom-label">${Math.round(state.zoom * 100)}%</span><button class="canvas-tool" data-action="zoom-in" aria-label="Zoom in">+</button><button class="canvas-tool fit-tool" data-action="fit" title="Fit graph">Fit</button><button id="delete-edge-button" class="canvas-tool" data-action="delete-edge" title="Select a connection to remove" aria-label="Delete selected connection" ${state.selectedEdgeId ? '' : 'disabled'}>Remove link</button></div></div><div class="canvas-viewport" id="canvas-viewport">${renderCanvasMarkup()}<div class="canvas-hint"><span class="hint-key">Esc</span> Cancel connection <span class="hint-divider">·</span> Drag canvas with space</div></div>${renderValidation()}</section>
-      <aside class="editor-right ${state.inspectorCollapsed ? 'is-collapsed' : ''}"><div id="inspector-panel" class="inspector-panel">${state.inspectorCollapsed ? `<div class="inspector-collapsed-strip"><button class="collapse-toggle-btn" data-action="toggle-inspector" aria-label="Expand inspector panel" title="Expand inspector panel">⇤</button><span class="inspector-vertical-title">PROPERTIES</span></div>` : `<div class="panel-heading"><div><h3>Properties</h3><p>Edit the selected node</p></div><button class="collapse-toggle-btn" data-action="toggle-inspector" aria-label="Collapse inspector panel" title="Collapse inspector panel">⇥</button></div>${renderInspector()}`}</div>${state.inspectorCollapsed ? '' : renderTestPanel()}</aside>
+    <div class="mobile-tab-bar">
+      <button type="button" class="mobile-tab-btn ${state.mobileTab === 'canvas' ? 'is-active' : ''}" data-mobile-tab="canvas">◇ Canvas</button>
+      <button type="button" class="mobile-tab-btn ${state.mobileTab === 'build' ? 'is-active' : ''}" data-mobile-tab="build">▦ Build & Fields (${state.graph.schema.length})</button>
+      <button type="button" class="mobile-tab-btn ${state.mobileTab === 'properties' ? 'is-active' : ''}" data-mobile-tab="properties">⚙ Properties & Test</button>
+    </div>
+    <div class="editor-workspace ${state.inspectorCollapsed ? 'inspector-collapsed' : ''} mobile-view-${state.mobileTab || 'canvas'}">
+      <aside class="editor-left">
+        <div class="panel-heading">
+          <div>
+            <h3>Build</h3>
+            <p>Drag or click to add nodes</p>
+          </div>
+        </div>
+        <div class="palette-group">
+          <span class="palette-label">NODE TYPES</span>
+          <button class="palette-card" draggable="true" data-add-node="condition">
+            <span class="palette-symbol palette-condition">?</span>
+            <span><strong>Condition</strong><small>Compare an input value</small></span>
+            <span class="palette-plus">+</span>
+          </button>
+          <button class="palette-card" draggable="true" data-add-node="group">
+            <span class="palette-symbol palette-group-symbol">∧</span>
+            <span><strong>Logic group</strong><small>Combine tests using AND / OR</small></span>
+            <span class="palette-plus">+</span>
+          </button>
+          <button class="palette-card" draggable="true" data-add-node="outcome">
+            <span class="palette-symbol palette-outcome">✓</span>
+            <span><strong>Outcome</strong><small>Return a terminal decision</small></span>
+            <span class="palette-plus">+</span>
+          </button>
+        </div>
+        ${renderSchema()}
+        <div class="left-help">
+          <span class="help-icon">⌘</span>
+          <span>Drag nodes onto canvas or use toolbar pills. Connect ports to branch. Press Esc to cancel.</span>
+        </div>
+      </aside>
+      <section class="canvas-area">
+        <div class="canvas-topline">
+          <div class="canvas-quick-add">
+            <span class="quick-add-label">Add:</span>
+            <button type="button" class="quick-pill pill-condition" data-add-node="condition" title="Add condition node">
+              <span class="quick-pill-glyph">?</span> Condition
+            </button>
+            <button type="button" class="quick-pill pill-group" data-add-node="group" title="Add logic group node">
+              <span class="quick-pill-glyph">∧</span> Logic group
+            </button>
+            <button type="button" class="quick-pill pill-outcome" data-add-node="outcome" title="Add outcome node">
+              <span class="quick-pill-glyph">✓</span> Outcome
+            </button>
+          </div>
+          <div class="canvas-stats">
+            <span>${state.graph.nodes.length} nodes · ${state.graph.edges.length} connections</span>
+          </div>
+          <div class="canvas-tools">
+            <button class="canvas-tool" data-action="zoom-out" aria-label="Zoom out" title="Zoom out">−</button>
+            <span class="zoom-label">${Math.round(state.zoom * 100)}%</span>
+            <button class="canvas-tool" data-action="zoom-in" aria-label="Zoom in" title="Zoom in">+</button>
+            <button class="canvas-tool fit-tool" data-action="fit" title="Fit graph">Fit</button>
+            <button id="delete-edge-button" class="canvas-tool" data-action="delete-edge" title="Select a connection to remove" aria-label="Delete selected connection" ${state.selectedEdgeId ? '' : 'disabled'}>Remove link</button>
+            <button class="collapse-toggle-btn" data-action="toggle-inspector" aria-label="${state.inspectorCollapsed ? 'Expand properties' : 'Collapse properties'}" title="${state.inspectorCollapsed ? 'Expand properties' : 'Collapse properties'}">${state.inspectorCollapsed ? '⇤' : '⇥'}</button>
+          </div>
+        </div>
+        <div class="canvas-viewport" id="canvas-viewport">
+          ${renderCanvasMarkup()}
+          <div class="canvas-hint">
+            <span class="hint-key">Esc</span> Cancel link
+            <span class="hint-divider">·</span> Hold Space to pan canvas
+          </div>
+        </div>
+        ${renderValidation()}
+      </section>
+      <aside class="editor-right ${state.inspectorCollapsed ? 'is-collapsed' : ''}">
+        <div id="inspector-panel" class="inspector-panel">
+          ${state.inspectorCollapsed ? `
+            <div class="inspector-collapsed-strip">
+              <button class="collapse-toggle-btn" data-action="toggle-inspector" aria-label="Expand inspector panel" title="Expand inspector panel">⇤</button>
+              <span class="inspector-vertical-title">PROPERTIES</span>
+            </div>
+          ` : `
+            <div class="panel-heading">
+              <div>
+                <h3>Properties</h3>
+                <p>Configure selected node</p>
+              </div>
+              <button class="collapse-toggle-btn" data-action="toggle-inspector" aria-label="Collapse inspector panel" title="Collapse inspector panel">⇥</button>
+            </div>
+            ${renderInspector()}
+          `}
+        </div>
+        ${state.inspectorCollapsed ? '' : renderTestPanel()}
+      </aside>
     </div>
   </section>`);
   attachCanvasEvents();
@@ -887,6 +985,7 @@ function attachCanvasEvents() {
         svg.setPointerCapture(event.pointerId);
       }
       renderInspectorPanel();
+      renderCanvas();
       return;
     }
     if (event.target.classList.contains('canvas-bg') || event.target.classList.contains('canvas-grid')) {
@@ -1188,6 +1287,12 @@ app.addEventListener('click', async (event) => {
         }
       }
     }
+    return;
+  }
+  const mobileTabBtn = event.target.closest('[data-mobile-tab]');
+  if (mobileTabBtn) {
+    state.mobileTab = mobileTabBtn.dataset.mobileTab;
+    render();
     return;
   }
   if (projectButton) { await openProject(projectButton.dataset.project); return; }
