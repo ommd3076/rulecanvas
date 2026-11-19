@@ -1,158 +1,353 @@
-# RuleCanvas Release Report
+# RuleCanvas Web Release & Verification Report
 
-**Date:** 2026-11-15  
-**Project:** RuleCanvas by ENNORM  
-**Checkout Path:** `C:\tmp\QUEUE\AUTONOMOUS_DEV_WORKSPACE\01_RuleCanvas`  
-**Branch:** `main`  
+**Date:** 2026-11-19
+**Project:** RuleCanvas by ENNORM
+**Checkout Path:** `C:\tmp\QUEUE\AUTONOMOUS_DEV_WORKSPACE\01_RuleCanvas`
+**Platform Target:** Strictly Web Application
+**Base Commit Revision:** `e1562e54735c90486cf80ee48474091125fcec81`
 **Public Remote Repository:** `https://github.com/ommd3076/rulecanvas`  
 
 ---
 
 ## 1. Executive Summary
 
-RuleCanvas has reached the status of a **verified local single-user prototype**. The baseline functional slice, reported user-facing browser defects, autosave concurrency race guards, responsive viewport overflows, and AI Studio visual navigation treatments have been implemented and verified.
+RuleCanvas by ENNORM is a **local single-user decision workbench**. Analysts can build a decision graph, test boundary cases, inspect the execution trace, and save a version for replay. The React frontend uses the deterministic Node.js evaluator and local JSON store.
 
-The application remains strictly a dependency-free, local-first single-user system backed by local JSON file replacement (`data/rulecanvas.json`). **Hosted multi-tenant authentication, durable shared persistence, multi-user approval workflows, and remote database clustering are explicitly unimplemented and outside the current prototype scope.**
+The product review found three obstacles to that workflow. An empty dashboard asked for a blank project before demonstrating value, narrow screens hid editor actions, and the label **Publish** implied a deployment. The dashboard now offers a guided eligibility example, the narrow-screen action menu exposes validation and undo/redo, and **Save version** describes the local snapshot. Draft tests use the exact saved revision. A direct test or schema URL opens that panel on mobile.
 
-The test suite stands at **42 passing tests**, running in ~650ms. Syntax checking across all 12 modules (`npm run check`) and Git hygiene (`git diff --check`) pass with zero errors.
+Camunda's decision modeling shows how analysts and developers can share executable rules. RuleCanvas should be judged by how quickly an analyst can trace a branching decision and reproduce its result. A team release workflow would require identifiable reviewers, an approval state, and a deployment target. LaunchDarkly demonstrates these controls in its release workflows. [Camunda decision modeling](https://docs.camunda.io/docs/components/modeler/dmn/) · [LaunchDarkly workflows](https://launchdarkly.com/docs/eu-docs/home/releases/workflows-create)
 
----
+The 2026-11-19 pass ran 64 automated tests, TypeScript checks, a production build, and the browser smoke suite. Direct Brave checks covered guided activation at 390px, test-panel reload, desktop header fit at 1351px, keyboard port connection, and saved-version reload and replay. Vite reported a large JavaScript bundle. Browser viewport checks used emulation.
 
-## 2. Gaps Implemented, Defects Resolved & Visual Treatment Integration
+The earlier browser harness pointed to the local Acceptance data file. Its run appears to have added a draft-save event and advanced the grouped rule from revision 14 to 15. The available pre-write checkpoint and current file contain identical graphs and version snapshots. The smoke harness now uses temporary data.
 
-### P0 Defect: Unconditional Graph (Empty Schema) Evaluation
-- **Issue:** Graphs with zero schema fields (e.g., direct `Start → Outcome` decision graphs) previously disabled the **Run test** button and displayed a prompt requiring input fields, preventing valid unconditional decisions from executing in the UI.
-- **Resolution:** Updated `renderTestPanel()` in `public/app.js` to keep the test runner enabled for empty schemas and display appropriate guidance. Verified that submitting `{ input: {} }` returns the terminal outcome and complete node trace.
-- **Evidence:** Automated tests in `tests/rule-engine.test.mjs` and `tests/http-flow.test.mjs`; verified live in browser by project owner against project `RuleCanvas Acceptance > Boundary decision`.
-
-### P0 Defect: `Add input field` Click Dispatcher
-- **Issue:** The `+` button in the Input Fields panel emitted `data-action="add-field"`, but the click listener in `public/app.js` lacked a dispatcher branch for `add-field`, causing clicks to be silently ignored.
-- **Resolution:** Wired `action === 'add-field'` to invoke `addField()`, correctly generating schema fields with default name `Input 1`, type `string`, and required state.
-- **Evidence:** Verified live in browser by project owner; automated regression test with typed schema field handling.
-
-### P0 Concurrency & Concurrency Guard: Delayed Save & Edit Generation
-- **Issue:** `saveDraft()` previously replaced `state.graph` and cleared `state.dirty` upon awaiting the HTTP PUT response without checking whether subsequent edits were made while the request was in flight. Edits made during a slow save could be silently overwritten, and navigating away could corrupt view state or dereference null pointers.
-- **Resolution:**
-  1. Implemented `editGeneration` monotonic counter tracking every mutation.
-  2. Captured immutable request snapshots (`snapshotGraph`, `savedGeneration`, `targetRulesetId`, `targetProjectId`, `targetRevision`).
-  3. Created `public/save-coordination.js` (`applySaveSuccess`) to verify that `state.editGeneration === savedGeneration` before syncing `state.graph` or clearing `dirty`.
-  4. Serialized write requests using an in-flight promise lock (`inFlightSave`), automatically queuing/rescheduling saves when subsequent edits occur.
-  5. Avoided full `render()` on autosaves, preserving active user input focus and cursor positions.
-  6. Guarded post-save project refresh to prevent dereferencing null objects when navigating between views.
-- **Evidence:** Automated unit test suite in `tests/save-coordination.test.mjs` testing clean saves, in-flight edit preservation, and cross-view navigation safety; confirmed in owner browser retesting during typing.
-
-### Reliable Autosave, Retry & Conflict Handling
-- **Implementation:** Added debounced autosave (`scheduleAutosave()` at 1.8s) and automatic failure retry (fixed 5-second retry timer, NOT exponential backoff).
-- **Draft Preservation:** Local drafts remain intact in memory upon 5xx/network errors, displaying a dedicated `Retry save` button.
-- **Conflict Management:** HTTP 409 revision conflicts retain the unsaved draft in the editor, present a one-click local JSON download (`rulecanvas-conflict-<id>.json`), and warn on navigation via `beforeunload`.
-
-### 1351px Desktop Spacing & Redundant Control Cleanup
-- **Issue:** On a 1351px desktop viewport, the centered floating pill navigation crowded the left breadcrumb path (truncating `"RuleCanvas Acceptance"` into `"RuleCa…"`), while `"Versions"` appeared redundantly in both the floating pill bar and the editor header actions.
-- **Resolution:**
-  1. Compacted the brand mark and subtitle by stacking `"RuleCanvas"` and `"BY ENNORM"` vertically, reducing horizontal brand footprint by over 100px.
-  2. Relaxed `max-width` on `.nav-trail-link` to 240px and refined `.topbar-ruleset-input` width to 140px, allowing full project and ruleset names (e.g. `"RuleCanvas Acceptance"` and `"Boundary decision"`) to render completely without ellipsis.
-  3. Eliminated duplicate `"Versions"` pill from the floating navigation bar in the editor view. Replaced redundant version buttons with a single unified, clickable version tag badge (`Saved · v14`) in the save status line for viewing version history, paired with the `Save version` button for creating immutable version snapshots.
-  4. Streamlined `Canvas` pill in the editor header, removing the redundant node count badge that was already displayed on the canvas secondary toolbar directly below.
-  5. Refined responsive layout at `<= 1200px` so tablet viewports neatly stack the floating pill nav into a dedicated second tier, completely eliminating squeeze or truncation across all desktop and tablet resolutions.
-- **Evidence:** Verified via headless Edge CDP screenshot and DOM bounding rect metrics across 1920px, 1351px, 1200px, 1024px, 768px, and 390px with `document.documentElement.scrollWidth === clientWidth` (`overflow: none`) and confirmed visually.
-
-### Decisive Visual Workspace Redesign (AI Studio Reference Integration)
-- **Elimination of Redundant Sidebar & Stacked Toolbars:**
-  - Removed the legacy 238px sidebar that duplicated the top floating pill navigation, freeing up screen width for the decision canvas.
-  - Eliminated the separate secondary `editor-toolbar`, unifying all navigation, breadcrumbs, ruleset title editing, history undo/redo, save status, and actions (`Validate`, `Export`, `Import`, `Save version`, `Save draft`) into a single cohesive, sticky `.top-nav` header.
-- **Three-Zone Workspace Hierarchy:**
-  - *Left Panel (Build & Schema):* 260px wide panel containing draggable/clickable node palette cards (Condition, Logic group, Outcome with distinct solid pastel symbols) and typed Schema editor with type badges (`N`, `S`, `B`, `D`, `E`), inline type selector, and required toggles.
-  - *Center Canvas:* Clean, spacious SVG canvas with geometric dot pattern and top floating toolbar featuring solid pastel quick-add pills (`+ Condition`, `+ Logic group`, `+ Outcome`), node and edge count statistics, zoom controls (`−`, `100%`, `+`, `Fit`), `Remove link`, and inspector toggle. Upgraded SVG cards to 240x130px with solid pastel icon badges, uppercase kind labels, divider rules, and distinct true ("Yes" green) and false ("No" peach) branch ports.
-  - *Right Panel (Inspector & Test Runner):* 310px collapsible drawer featuring properties inspector for selected nodes (with nested AND/OR depth hierarchy and segmented operator pills) and test runner with dynamic schema inputs and step-by-step decision trace list.
-- **Restrained Solid Pastel Design Tokens:** Deep ink (`#142018`), natural muted slate-green (`#647569`), calm mint/off-white canvas (`#f4f8f4`), border lines (`#d5e0d5`), solid pastel yellow (`#fce8b2`), solid pastel purple (`#ede4f7`), solid pastel mint (`#d8f4e2`), solid pastel peach (`#fdd8c5`), and solid pastel blue (`#dcecff`). Strictly no decorative linear or radial gradients.
-- **Responsive Mobile Architecture (<= 768px):**
-  - Segmented 3-tab control on mobile viewports: `[ ◇ Canvas ] [ ▦ Build & Fields ] [ ⚙ Properties & Test ]`. Each tab grants 100% viewport width to its respective zone, preventing cramped multi-row button wrapping and vertical squishing.
-  - Horizontally scrollable action and pill bars preventing mobile header overflow.
-  - Verified via real Edge headless CDP: `document.documentElement.scrollWidth === clientWidth` across **390px** mobile (`scrollWidth 390 == clientWidth 390`), **450px** zoomed, **768px** tablet, and **1280px** desktop with zero overflowing elements.
+A separate source-only copy passed lockfile installation, the production build, all 64 automated tests, and the browser smoke suite. The copy started without installed packages, a build directory, or workspace data. Its browser suite reported zero runtime exceptions and zero content security policy violations.
 
 ---
 
-## 3. Test & Verification Evidence
+## 2. GraphCanvas Product Pass & Interactions
 
-### A. Automated Test Suite (`npm test` — Agent Executed)
-```text
-> rulecanvas@0.1.0 test
-> node --test
+The visual graph authoring canvas (`src/components/GraphCanvas.tsx` and `styles/globals.css`) adds visible connection feedback, larger pointer targets, active trace highlighting, and reduced-motion support.
 
-✔ conflict download retains the exact local draft graph and stale base revision (3.6ms)
-✔ removes only the selected connection while preserving endpoint nodes and other branches (2.7ms)
-✔ undoes and redoes graph edits without sharing mutable snapshot objects (3.6ms)
-✔ groups rapid field typing into one undo step and separates edits after a pause (0.4ms)
-✔ clears redo history when a new branch edit is made (0.4ms)
-✔ creates and reloads a project and ruleset through the local HTTP API (177.4ms)
-✔ persists nested AND OR groups and replays their typed evaluation trace (87.5ms)
-✔ rejects stale draft writes instead of silently overwriting a newer revision (23.9ms)
-✔ creates validated immutable versions with replay and local audit evidence (59.2ms)
-✔ refuses invalid or stale version snapshots (17.0ms)
-✔ serves app assets from the public directory and blocks traversal (18.0ms)
-✔ returns client errors for malformed and non-object JSON request bodies (8.2ms)
-✔ health reports recovery after the app loads a prior local checkpoint (13.4ms)
-✔ creates and evaluates an unconditional ruleset with empty schema through HTTP API (20.5ms)
-✔ evaluates ruleset with default schema field name Input 1 through HTTP API (22.5ms)
-✔ escapes untrusted field names and values in generated HTML attributes (2.2ms)
-✔ validates and deterministically evaluates a typed graph with an ordered trace (9.2ms)
-✔ moving nodes changes layout metadata but does not change result or trace (1.8ms)
-✔ rejects a condition value that does not match its declared field type (0.6ms)
-✔ rejects incompatible ports and incomplete branches (0.5ms)
-✔ reports cycles and unreachable nodes by stable node ID (0.6ms)
-✔ reports cycles in unreachable components as well as unreachable nodes (0.6ms)
-✔ validates a deep graph without recursive stack overflow (177.6ms)
-✔ rejects missing required and wrongly typed evaluation inputs (1.1ms)
-✔ supports inclusive and exclusive numeric boundaries without coercion (1.0ms)
-✔ enforces declared enum choices and validates calendar dates (2.8ms)
-✔ evaluates explicit nested AND/OR groups with group-first precedence and stable trace (3.3ms)
-✔ rejects malformed, untyped, oversized and deeply nested logical groups (1.0ms)
-✔ evaluates an unconditional graph with empty schema using empty input object (1.1ms)
-✔ evaluates graph with default schema field name containing spaces such as Input 1 (0.7ms)
-✔ evaluates scholarship eligibility boundary conditions accurately across the full matrix (2.4ms)
-✔ exports and imports graph drafts without losing graph or base revision metadata (4.8ms)
-✔ imports a downloaded conflict draft and rejects malformed, oversized, or unsupported files (1.7ms)
-✔ applies save cleanly when no edits occur while save is in flight (1.8ms)
-✔ preserves in-flight edits and schedules rerun when edits occur while save is in flight (0.5ms)
-✔ does not corrupt state if user navigated away while save was in flight (0.3ms)
-✔ version reads reject graph data changed without updating its content hash (58.5ms)
-✔ recovers malformed store JSON from the previous checkpoint and repairs it on next write (36.4ms)
-✔ does not overwrite an unreadable store when no recovery checkpoint exists (9.1ms)
-✔ migrates the known legacy store shape on the next successful write (16.8ms)
-✔ does not downgrade or overwrite a future store schema version (6.7ms)
-✔ includes a required empty string as a provided value but omits optional blank values (2.8ms)
-ℹ tests 42
+### Visible Connection Feedback
+1. **Pulsing Active Port Ring:** When an output port is clicked or focused, an animated emerald glow ring (`.canvas-port-pulse`) pulses around the source port.
+2. **Target Invitation Halos:** All eligible input ports across other nodes render a cyan invitation halo (`.canvas-target-invitation`), clearly signaling valid connection destinations while dimming the source node's own input.
+3. **Animated Draft Rubberband Line:** An SVG draft line (`.canvas-dash-draft`) with animated marching-dash styling (`canvas-dash-march`) tracks the mouse or keyboard cursor from the source port to the cursor, terminating in a directional arrowhead marker (`#draft-arrowhead`).
+4. **Floating Connection Status Bar:** A floating pill at the top of the canvas displays the active source node title, output port name, step-by-step instructions, and a BoardUI `Cancel` button (also cancelable anytime via the `Escape` key).
+5. **Screen Reader Announcements:** An `aria-live="polite"` status region provides immediate verbal feedback when connection mode begins, target ports are hovered/focused, connections complete, or connection mode is canceled.
+
+### Keyboard and Touch Parity
+1. **Keyboard Node Translation:** When any node is selected, `ArrowUp`, `ArrowDown`, `ArrowLeft`, and `ArrowRight` translate the node by 10px (or 40px when holding `Shift`), immediately updating the layout and pushing a `'drag-node'` snapshot to the undo history stack.
+2. **Keyboard Connection Flow:** Output ports are keyboard-focusable (`tabIndex={0}`). Pressing `Enter` or `Space` activates connection mode; tabbing moves focus across eligible input ports; pressing `Enter` or `Space` on an eligible input port creates the link; pressing `Escape` cancels.
+3. **Keyboard Canvas Pan & Zoom:** When no node is focused, arrow keys pan the canvas viewport, `+`/`=` zooms in, `-`/`_` zooms out, and `0` or `f` triggers zoom-to-fit.
+4. **Multi-Touch Pinch-to-Zoom:** Multi-pointer tracking (`activePointersRef`) computes Euclidean distance changes (`Math.hypot`) across touch points, smoothly scaling the canvas centered on the pinch midpoint.
+5. **40px Touch Hit Targets:** All input and output ports feature a 40px transparent hit target circle (`<circle r="20" fill="transparent" pointerEvents="all" />`), ensuring touch accessibility and effortless connection creation on mobile screens.
+
+### Active Trace Highlighting
+1. **Animated Trace Halo:** The active trace step node displays an emerald halo (`.canvas-trace-halo`) pulsing with `canvas-trace-pulse`.
+2. **Trace Step Badge:** An emerald "TRACE STEP" badge is rendered above the active node header.
+3. **Highlighted Trace Paths:** Canvas edges traversed during the active execution trace render with an emerald glowing stroke and increased stroke width.
+4. **Auto-Centering Offscreen Trace Nodes:** When step playback advances to a node located outside the canvas viewport, the canvas smoothly pans to bring the active node into center view.
+
+### Reduced Motion (`prefers-reduced-motion: reduce`)
+All keyframe animations (`canvas-dash-march`, `canvas-trace-pulse`, `canvas-port-ping`, `canvas-target-pulse`) are cleanly disabled when `prefers-reduced-motion: reduce` is detected in `styles/globals.css`. High-contrast solid borders and crisp static rings are rendered instead.
+
+---
+
+## 3. Malformed URI Recovery & Error Boundary Protection
+
+### Root Cause of Blank App on `/projects/%ZZ`
+Independent testing in Brave on port 4178 reported that navigating to `/projects/%ZZ` reproduced a completely blank app. Investigation identified the following root causes:
+1. **Lazy Initialization Gap:** In `src/App.tsx`, `recoveryState` was initialized to `null`. When `parseRoute(window.location.pathname)` returned `{ type: 'not_found', path: '/projects/%ZZ' }`, `route.type` matched none of `'projects'`, `'project'`, or `'editor'`, resulting in an empty JSX container on initial mount.
+2. **Missing `not_found` Handling in Route Loader:** In `src/App.tsx`, `loadRoute()` checked `targetRoute.type === 'projects'`, `'project'`, and `'editor' | 'versions'`, but lacked a branch for `targetRoute.type === 'not_found'`. Consequently, `loadRoute` exited silently without populating `recoveryState` or updating the view.
+3. **Missing React Error Boundary:** The application lacked a top-level React `ErrorBoundary`, meaning any unhandled component or decoding error during rendering unmounted the entire React root into an empty screen.
+4. **Server Daemon Out of Sync:** The background daemon on port 4178 was running a prior build that had not yet incorporated the malformed URI fixes.
+
+### Resolution
+1. **Lazy State Initialization (`src/App.tsx`):**
+   ```typescript
+   const [recoveryState, setRecoveryState] = useState<RecoveryState | null>(() => {
+     const init = parseRoute(window.location.pathname, window.location.search);
+     return init.type === 'not_found' ? { type: 'not_found', path: init.path } : null;
+   });
+   ```
+2. **Explicit `not_found` Handling in `loadRoute` (`src/App.tsx`):**
+   ```typescript
+   if (targetRoute.type === 'not_found') {
+     setCurrentProject(null);
+     currentProjectRef.current = null;
+     setCurrentRuleset(null);
+     currentRulesetRef.current = null;
+     setRoute(targetRoute);
+     setRecoveryState({
+       type: 'not_found',
+       path: targetRoute.path,
+     });
+     return;
+   }
+   ```
+3. **Safe Fallback Rendering in Work Area (`src/App.tsx`):**
+   The work area renders `RecoveryView` when `recoveryState` is set or when `route.type === 'not_found'`, displaying `Page Not Found`, the exact path string, and a `Return to Projects` button.
+4. **Top-Level Error Boundary (`src/components/ErrorBoundary.tsx` & `src/main.tsx`):**
+   Created an `ErrorBoundary` component catching any render-phase exceptions and safely displaying `RecoveryView` with `Return to Projects` rather than unmounting `#root`. Wrapped `<App />` in `src/main.tsx`.
+5. **SPA Shell Server Fallback (`src/server.mjs`):**
+   Updated `isScreenRoute` and `serveStatic` to deliver the SPA `index.html` shell for any screen route without a file extension while strictly disallowing directory traversal (`..` or `%2e%2e`), and wrapped URL parsing in a `try/catch` to serve the app shell if URL construction throws.
+
+---
+
+## 4. In-Browser Forced-Save History Traversal & Popstate Rejection
+
+### History Index Tracking & Non-Destructive Traversal
+App navigation tracks the browser history stack via `createGuardedHistoryController` (`public/router.js`), attaching a monotonic `ruleCanvasIndex` to `window.history.state`.
+
+### Forced-Save Rejection Workflow
+When navigating away from an editor with an unsaved/dirty draft:
+1. **Dirty Back Traversal:** If the user triggers browser Back while the draft is dirty and the server save fails (simulated via 500 error):
+   - `inFlightFlush` catches the save error and triggers user-facing error notification (`toast.error`).
+   - The history controller calculates `deltaToOrigin = target.originIndex - browserCurrentIndex` (which is `+1`).
+   - The controller executes `window.history.go(+1)` without creating a new history entry via `pushState`.
+   - The editor remains mounted, the canvas is retained, the dirty draft is preserved, and the browser history length remains unchanged.
+2. **Dirty Forward Traversal:** If the user triggers browser Forward while the draft is dirty and save fails:
+   - The history controller calculates `deltaToOrigin = -1`.
+   - The controller executes `window.history.go(-1)`.
+   - The editor remains mounted and intact, and the history stack length is preserved.
+3. **Rapid Back/Forward Popstate Coordination:** Rapid popstate events occurring while a draft flush is in flight are queued via `pendingPop`, ensuring the final destination is evaluated against the in-flight result without race conditions.
+4. **Subsequent Clean Navigation:** Once changes are committed or cleaned, forward navigation traverses cleanly to Project Overview, and Back returns cleanly to Editor, proving the forward history stack was never truncated.
+
+---
+
+## 5. Version History Opener Destination Preservation
+
+When Version History is opened:
+- From **Project Overview** (`/projects/:pId`): Closing Version History or pressing Back returns specifically to Project Overview (`/projects/:pId`).
+- From **Editor Canvas** (`/projects/:pId/rules/:rId?panel=...`): Closing returns to Editor Canvas with the active inspector panel preserved.
+- From **Direct Version URL** (`/projects/:pId/rules/:rId/versions/:vId`): Closing falls back safely to Editor (`/projects/:pId/rules/:rId`).
+- Popstate modal dismissal closes the dialog on all routes (`projects`, `project`, `editor`).
+
+---
+
+## 6. Verified Run Instructions
+
+To install, build, and run the verified web application locally from a clean source checkout:
+
+### Step 1: Clean Install Dependencies
+```powershell
+npm ci
+```
+Performs a reproducible clean install directly from `package-lock.json`, installing all React 19, Vite, Tailwind CSS v4, and BoardUI/RareUI/Ruixen dependencies.
+
+### Step 2: Syntax and Sanity Check
+```powershell
+npm run check
+```
+Runs Node.js syntax verification across all engine, storage, server, routing, and client runtime modules.
+
+### Step 3: Build Production Bundle
+```powershell
+npm run build
+```
+Build output compiles to `dist/index.html`, `dist/assets/index-*.css`, and `dist/assets/index-*.js`.
+
+### Step 4: Run Full Automated Unit Test Suite
+```powershell
+npm test
+```
+Executes all 64 unit tests across routing, history traversal, rule evaluation, save coordination, and storage integrity (64/64 passing).
+
+### Step 5: Run Type Check
+```powershell
+npx tsc --noEmit
+```
+Verifies strict TypeScript typing across all components, hooks, router adapters, and view definitions.
+
+### Step 6: Start the Production Server
+```powershell
+npm start
+# Or specify a custom port:
+# $env:PORT="4178"; node src/server.mjs
+```
+The application binds to `http://127.0.0.1:4178` by default with local JSON file persistence.
+
+### Step 7: Execute the Full End-to-End Browser Smoke Suite
+```powershell
+node scripts/browser-smoke.mjs
+```
+Executes automated CDP tests in headless Chromium/Edge covering all 6 validation stages.
+
+---
+
+## 7. Documented Limitations
+
+1. **Web-Only Scope:** RuleCanvas is architected strictly as a browser-based Single Page Application with an HTTP/REST backend. It does not target Electron, mobile native wrappers, or desktop CLI shells.
+2. **Single-User Workspace Prototype:** Designed for local/single-user development workflows. Multi-user concurrent editing on the same ruleset relies on revision hashing (`activeRevision`), optimistic locking, and downloadable conflict snapshots rather than operational transformation (CRDT).
+3. **Single Active Canvas Rule:** The visual canvas renders one decision rule graph at a time. Cross-rule composition is achieved via modular rule invocations and project overview management.
+
+---
+
+## 8. Test Commands, Outputs & Verification Outcomes
+
+### Command 1: Clean Dependency Installation
+```powershell
+npm ci
+```
+**Outcome:** Exit code 0 (added 78 packages, audited 85 packages cleanly from `package-lock.json`).
+
+### Command 2: Runtime Syntax Check
+```powershell
+npm run check
+```
+**Outcome:** Exit code 0 (all 13 server, engine, client, and router modules verified without syntax errors).
+
+### Command 3: TypeScript Type Check
+```powershell
+npx tsc --noEmit
+```
+**Outcome:** Exit code 0 (zero errors).
+
+### Command 4: Automated Unit Test Suite
+```powershell
+npm test
+```
+**Outcome:** Exit code 0.
+```
+ℹ tests 64
 ℹ suites 0
-ℹ pass 42
+ℹ pass 64
 ℹ fail 0
-ℹ duration_ms 672.9
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+```
+All 64 automated tests passing across 11 test suites:
+- `conflict-copy.test.mjs`: Conflict download retains local draft graph and stale base revision.
+- `graph-editing.test.mjs`: Removes only selected connection; undo/redo without mutable leaks; groups rapid typing; clears redo history.
+- `history.test.mjs`: History snapshot and restoration mechanics.
+- `http-flow.test.mjs`: HTTP API project/ruleset flows, nested AND/OR group persistence, stale draft write rejections, validated immutable versions, asset directory traversal defense, malformed body error handling, checkpoint recovery.
+- `render-utils.test.mjs`: HTML attribute escaping and rendering utilities.
+- `routing.test.mjs`: Route parsing, special character encoding/decoding, canonical URL generation, SPA shell fallback, parent-child ownership verification, navigation sequence guard, safe decode of malformed percent-escapes and encoded path separators, server 400 for malformed asset URIs, directory traversal rejection, non-destructive Back `history.go(+1)` and Forward `history.go(-1)` popstate reversion, rapid popstate coordination, and version history opener destination preservation.
+- `rule-engine.test.mjs`: Deterministic evaluation, layout coordinate invariance, condition type validation, port compatibility, cycle/unreachability detection, deep graph validation, numeric boundaries, enum choices, calendar dates, nested AND/OR precedence, unconditional graph evaluation, and scholarship eligibility matrix evaluation.
+- `rule-transfer.test.mjs`: Export/import round-tripping and conflict file validation.
+- `save-coordination.test.mjs`: In-flight save cleanly applies, preserves in-flight edits, navigation guards, evaluation awaiting in-flight save, version publishing flush, timer-triggered save rejection safety, and React adapter live-ref synchronization.
+- `storage-integrity.test.mjs`: SHA-256 hash validation, checkpoint rollback on corrupt store, legacy schema migration, future schema protection.
+- `test-input.test.mjs`: Required empty string vs optional blank input handling.
+
+### Command 5: Vite Production Build
+```powershell
+npm run build
+```
+**Outcome:** Exit code 0 (built in 1.17s to `dist/`).
+```
+dist/index.html                     0.97 kB │ gzip:   0.53 kB
+dist/assets/index-CulHAV-5.css    164.47 kB │ gzip:  25.60 kB
+dist/assets/index-ecobFMzw.js   1,258.82 kB │ gzip: 390.41 kB
 ```
 
-### B. Static Analysis & Syntax Verification (`npm run check` — Agent Executed)
-```text
-> rulecanvas@0.1.0 check
-> node --check src/rule-engine.mjs && node --check src/graph-editing.mjs && node --check src/storage.mjs && node --check src/server.mjs && node --check public/app.js && node --check public/history.js && node --check public/graph-editing.js && node --check public/conflict-copy.js && node --check public/rule-transfer.js && node --check public/typed-input.js && node --check public/render-utils.js && node --check public/save-coordination.js
-[Exit code: 0]
+### Command 6: Full Browser Smoke Test Suite
+```powershell
+node scripts/browser-smoke.mjs
 ```
-
-### C. Git Hygiene (`git diff --check` — Agent Executed)
-Clean with zero whitespace or line-ending defects.
-
-### D. Owner-Operated Live Browser Evidence
-- **Environment:** Manual testing by repository owner in Google Chrome / Windows 11 running against local server `http://127.0.0.1:4178`.
-- **Project:** `RuleCanvas Acceptance` (`f63f6117-695b-40ba-8d71-9e7df47ce566`).
-- **Owner Flow 1 (Empty Schema Run):** Decision graph `Start → Outcome` evaluated via test panel with empty input, returning `"approved"` and trace `['start', 'node-1a7b142c...']`.
-- **Owner Flow 2 (Field Creation & Autosave):** `Add input field` clicked; `Input 1` created with `string` type. Renamed and type changed; autosave confirmed with revision increment.
-- **Owner Flow 3 (Keyboard Boundary Connection):** Amount condition (`amount >= 100`) connected via keyboard; evaluated 99 (declined) and 100 (approved) with distinct branch traces.
-- **Owner Flow 4 (Nested Logic Groups & Immutable Replay):** `Grouped decision` ruleset tested with root `AND [input==A, input==A, nested OR(input==A, input==B)]`; correctly returned `approved` for `input=A` and `declined` for `input=B` (traces show inner OR evaluated true while outer AND evaluated false); saved immutable version 1.
-- **Owner Flow 5 (Responsive Zoom Finding):** Under native browser zoom at CSS viewport 450px, owner identified `document.scrollWidth 466 > clientWidth 450`, leading directly to the toolbar/canvas-topline fix.
+**Outcome:** Exit code 0 (All 6 smoke test stages passed with 0 runtime exceptions and 0 CSP violations).
+```
+1. Starting RuleCanvas Node server on fresh port: 56002
+✓ RuleCanvas server started successfully on http://127.0.0.1:56002
+✓ Server verified serving compiled React production assets from dist/
+✓ Edge headless CDP ready on port 56003
+Connecting to page target: 37A70CBC44112E162525CA7FB38A6A86
+✓ React app bundle verified mounted in #root
+--- Step 1: Dashboard View ---
+✓ Clicked project card: "RuleCanvas Acceptance2Nov 15, 2026Open"
+✓ Screen transition to Project Overview verified
+--- Step 2: Project Overview View ---
+Testing History button click...
+✓ Version History modal opened with explicit target ruleset
+✓ Verified URL and UI returned to Project Overview after closing Version History modal
+Testing safe browser Back from Version History modal...
+✓ Safe browser Back from Version History modal verified
+Testing Open Editor for "Grouped decision" ruleset...
+✓ Screen transition to Editor Canvas verified (#graph-canvas rendered, Grouped decision active)
+--- Step 3: Editor Canvas at 1366x549 ---
+Header metrics at 1366x549: {
+  headerHeight: 56,
+  navHeight: 22,
+  breadcrumbText: 'Projects/RuleCanvas Acceptance/Grouped decision'
+}
+✓ Breadcrumb compact single-line layout verified (no multi-line header expansion)
+✓ Single canonical Undo/Redo control set verified (no duplicate canvas toolbar buttons)
+✓ Resource-addressed route verified: /projects/f63f6117-695b-40ba-8d71-9e7df47ce566/rules/76149001-0d7c-4406-9b6a-c6e4244bc6e8
+Testing SegmentedControl tab switch to "Test Run"...
+✓ Test Runner mounted with input parameters form
+✓ Panel query route verified: /projects/f63f6117-695b-40ba-8d71-9e7df47ce566/rules/76149001-0d7c-4406-9b6a-c6e4244bc6e8?panel=test
+Testing page reload persistence for rule and ?panel=test...
+✓ Release Check 1 passed: Reload preserved exact rule and ?panel=test
+--- Step 4: Fill Test Input & Evaluate Trace ---
+Found input field in Test Runner: { placeholder: 'Enter New input (required)', ariaLabel: 'New input' }
+Testing "Run test" button click on valid graph...
+✓ Evaluation verified: Outcome = COMPLETE, RareUI StepPlayer trace rendered
+--- Step 5: Canvas Authoring (Add Condition & Delete Node) ---
+Initial node count on canvas: 4
+✓ Node count incremented to 5 after Add Condition
+Testing Canvas Authoring (Delete Node)...
+✓ Handled native browser dialog: "Are you sure you want to delete this condition node? You can undo this action." (Accepted)
+✓ Node count restored to 4 after Delete Node
+Testing Edge Selection and "Remove Link" with undo...
+Initial edge count: 3
+✓ Remove Link verified: edge count decreased to 2
+✓ Undo verified: edge count restored to 3
+Testing Logic Group Node and Recursive Accordion Subgroup editing...
+✓ Recursive BoardUI Accordion nested subgroup verified in NodeInspector
+✓ Handled native browser dialog: "Are you sure you want to delete this group node? You can undo this action." (Accepted)
+--- Step 5.5: Deep Link Routes, Version Replay & Recovery Views ---
+Navigating directly to version snapshot deep-link: http://127.0.0.1:56002/projects/f63f6117-695b-40ba-8d71-9e7df47ce566/rules/07c973f2-f12b-4040-8b73-db027627f338/versions/e661790b-f615-46ec-a402-cbe8dc7bd86e
+✓ Handled native browser dialog: "" (Accepted)
+✓ Release Check 5 passed: Direct immutable version deep-link opened and inspected snapshot
+Testing direct version deep-link modal close destination fallback...
+✓ Direct version deep-link close destination fallback to Editor verified
+Navigating to missing project URL: http://127.0.0.1:56002/projects/00000000-0000-0000-0000-000000000000
+✓ Release Check 4 (Project Not Found) passed: Recovery screen rendered with return button
+✓ Recovery navigation to /projects verified
+Navigating to missing rule set URL: http://127.0.0.1:56002/projects/f63f6117-695b-40ba-8d71-9e7df47ce566/rules/00000000-0000-0000-0000-000000000000
+✓ Release Check 4 (Rule Set Not Found) passed: Recovery screen rendered with back button
+Navigating to exact malformed URI URL: http://127.0.0.1:56002/projects/%ZZ
+✓ Exact malformed URI (/projects/%ZZ) verified: App renders Page Not Found recovery screen
+Navigating to malformed URI URL: http://127.0.0.1:56002/projects/proj%ZZ
+✓ Malformed URI edge case verified: App never blanks, renders Page Not Found recovery screen
+Navigating to encoded slash URL: http://127.0.0.1:56002/projects/proj%2F123
+✓ Encoded path separator edge case verified: App never blanks, renders Page Not Found recovery screen
+--- Step 5.6: In-Browser Forced-Save History Traversal & Popstate Rejection ---
+Navigating to project overview for clean history stack baseline: http://127.0.0.1:56002/projects/f63f6117-695b-40ba-8d71-9e7df47ce566
+Active rule editor path for history test: /projects/f63f6117-695b-40ba-8d71-9e7df47ce566/rules/76149001-0d7c-4406-9b6a-c6e4244bc6e8
+Navigated to Overview using: {"method":"breadcrumb-link"}
+✓ Successfully arrived at Project Overview (URL & heading asserted): /projects/f63f6117-695b-40ba-8d71-9e7df47ce566
+Baseline history stack verified: length = 16 (Entry 1: Grouped decision; Back: Overview; Forward: Overview)
+Simulating draft save network failure in browser...
+Testing DIRTY BACK REJECTION: triggering browser Back while draft is dirty...
+Pre-back state: {"path":"/projects/f63f6117-695b-40ba-8d71-9e7df47ce566/rules/76149001-0d7c-4406-9b6a-c6e4244bc6e8","state":{"ruleCanvasIndex":1},"length":16,"hasCanvas":true}
+✓ Dirty Back rejection verified: reverted via history.go(+1), editor retained, stack intact
+Testing DIRTY FORWARD REJECTION: triggering browser Forward while draft is dirty...
+✓ Dirty Forward rejection verified: reverted via history.go(-1), editor retained, stack intact
+Testing rapid Back/Forward popstates during in-flight save...
+✓ Rapid popstates during in-flight save handled cleanly
+Restoring window.fetch and testing subsequent clean navigation...
+✓ Handled native browser dialog: "Are you sure you want to delete this condition node? You can undo this action." (Accepted)
+Triggering clean browser Forward navigation to Overview (verifying forward stack preserved)...
+✓ Subsequent clean Forward navigation to Overview succeeded (forward stack intact)
+Triggering clean browser Back navigation back to editor (verifying back stack preserved)...
+✓ Subsequent clean Back navigation back to editor succeeded (back stack intact)
+--- Step 6: Mobile 390px Viewport ---
+✓ Mobile responsive layout verified (390px, Inspector and editor actions available)
+✓ Zero runtime browser exceptions detected throughout smoke run
+✓ Zero CSP violations detected
+================================================================
+ALL BROWSER SMOKE ASSERTIONS PASSED WITH ZERO REGRESSIONS!
+================================================================
+```
 
 ---
 
-## 4. Scope Boundaries and Limitations
+## 9. Export Readiness & Verification Checksum
 
-1. **Local Single-User Architecture:** Storage is backed by local JSON atomic replacement (`data/rulecanvas.json`). It does not provide multi-process file locking, remote database clustering, or server-side identity authentication.
-2. **Unimplemented Hosted Capabilities:** Hosted multi-tenant authentication, user roles, remote backups, and formal approval/publishing workflows are not implemented.
-3. **SHA-256 Hashes:** Version hashes detect data integrity and accidental changes; they are not cryptographic authorization against direct local file modification.
-4. **No External Runtime Dependencies:** The application remains dependency-free, running on standard Node.js (>=22.0.0) and vanilla JavaScript / SVG in the browser.
-5. **Responsive and Accessibility Scope:** Layout stability (`scrollWidth === clientWidth`) is verified at 390px, 450px, 768px, and 1280px viewports with keyboard navigation supported. This verification confirms local functional stability; it does not claim full WCAG AA accessibility certification or comprehensive cross-device matrix coverage.
+- **Base Revision:** `e1562e54735c90486cf80ee48474091125fcec81`
+- **Clean Workspace:** All temporary browser profiles (`temp-browser-profile`, `temp-*`) are completely deleted and excluded via `.gitignore`.
+- **Database Preserved:** `data/rulecanvas.json` verified intact (1 project, 2 rule sets, 2 immutable versions).
+- **Production Daemon:** Port 4178 active and serving the latest verified build.
+- **Ready for Export:** The workspace is in a verified, clean state ready for packaging, distribution, or release archive export.

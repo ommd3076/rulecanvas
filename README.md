@@ -1,10 +1,11 @@
 # RuleCanvas
 
-RuleCanvas is a visual workbench for building, validating, and evaluating deterministic business rules. This checkout is a new implementation started because the original application source and repository were not available; it does not claim to contain imported history or existing application code.
+RuleCanvas by ENNORM is a local visual workbench for analysts who need to explain how business rules choose an outcome. Build a decision graph, test boundary cases, and save a version you can replay later.
 
 ## Current vertical slice
 
 - Create a named project and reopen it from local JSON storage.
+- Try a guided eligibility rule from an empty workspace. Run the prefilled boundary case and follow the trace through each node.
 - Create a draft ruleset with a persistent revision number.
 - Edit an interactive SVG graph: drag condition, logic-group, and outcome nodes from the palette, move nodes, and connect typed flow ports by pointer or keyboard.
 - Build nested AND/OR groups in the inspector with typed condition leaves; nested groups explicitly define mixed-operator precedence and expose true/false graph branches.
@@ -13,7 +14,7 @@ RuleCanvas is a visual workbench for building, validating, and evaluating determ
 - Undo and redo graph edits with grouped text entry, toolbar controls, and editor keyboard shortcuts.
 - Define typed input fields (`string`, `number`, `boolean`, `date`, and `enum`), required state, and enum options.
 - Validate branch completeness, edge compatibility, duplicate IDs, missing references, cycles, and unreachable nodes.
-- Evaluate a saved graph against typed input and return a deterministic result with an ordered node-ID trace.
+- Evaluate the intended saved revision against typed input and follow a deterministic, ordered node trace.
 - Reject stale concurrent draft writes with a revision conflict instead of silently overwriting.
 - Keep a conflicting unsaved draft in the editor, warn before leaving the page, and offer a local JSON download before reloading the server copy.
 - Export the current draft to versioned JSON and import either a draft export or conflict copy after server-side graph validation.
@@ -25,27 +26,31 @@ RuleCanvas is a visual workbench for building, validating, and evaluating determ
 
 ## Run locally
 
-Requires Node.js 22 or newer. No third-party runtime packages are required.
+Requires Node.js 22 or newer.
 
 ```sh
-npm test
-npm run check
-npm start
+npm ci          # Clean install dependencies from lockfile
+npm test        # Run automated test suite
+npm run check   # Run syntax checks
+npm run build   # Build production React frontend via Vite
+npm start       # Start server on http://127.0.0.1:4178
 ```
 
 Open `http://127.0.0.1:4178`. By default, project data is written to `data/rulecanvas.json`, which is ignored by Git. Set `RULECANVAS_DATA_FILE` to use another local path.
+
+On Windows with Microsoft Edge installed, run `node scripts/browser-smoke.mjs` after building. It starts its own loopback server, synthetic test store, and temporary browser profile.
 
 ## Architecture and scope
 
 - `src/rule-engine.mjs` contains pure graph validation, typed input validation, and deterministic evaluation.
 - `src/storage.mjs` serializes local JSON file changes with atomic replacement and per-process optimistic revisions.
 - `src/server.mjs` serves the app and a small JSON API, binding to `127.0.0.1` by default.
-- `public/` contains the dependency-free HTML, CSS, SVG canvas, and browser interaction code.
+- `src/App.tsx` and `src/components/` contain the React workspace. `public/` provides shared browser modules, static assets, and the legacy shell served when a React build is absent.
 
 This is a local single-user prototype. Version records and the event ledger are local workspace data, not a hosted publishing or approval system; there is no authentication, role system, remote database, actor identity beyond `local workspace`, or multi-process locking. A previous pre-write checkpoint is kept beside the JSON data file as `.bak`; if the active file is malformed, the app loads that prior snapshot and shows a persistent recovery notice. Before a recovery write replaces the damaged file, the exact original bytes are preserved in a unique `.corrupt-*` sidecar. Recovery can roll back the most recent successful write, does not recover a deleted file, and is not a substitute for external backups. Local file persistence and a same-process conflict test do not establish production durability or multi-user concurrency. Do not bind this server to a public interface.
 
 The visual language incorporates the verified RuleCanvas design system:
-- **Unified Header & Navigation:** Single top navigation header eliminating redundant sidebars and stacked toolbars. Features brand lockup (`R RuleCanvas by ENNORM`), inline breadcrumb trail and ruleset rename input, centered floating pill workbench navigation, and right-aligned draft/version action controls.
+- **Workspace navigation:** Project and rule breadcrumbs, draft save state, version history, and a compact actions menu on narrow screens. The [sitemap](SITEMAP.md) lists the deep links for each workspace view.
 - **Three-Zone Workspace:**
   - *Left Panel:* Build palette (draggable/clickable Condition, Logic group, and Outcome cards) and typed Input Fields (Schema) editor with type badges and required states.
   - *Center Canvas:* Distraction-free SVG decision canvas with geometric dot grid, floating quick-add pills (`+ Condition`, `+ Logic group`, `+ Outcome`), node stats, zoom/fit controls, remove link, and inspector collapse toggle. Upgraded SVG cards (240x130px) with solid pastel badges and distinct branch port markers.
