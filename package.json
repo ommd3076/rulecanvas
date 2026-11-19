@@ -6,10 +6,42 @@
   "type": "module",
   "scripts": {
     "start": "node src/server.mjs",
+    "build": "vite build",
+    "dev": "vite",
     "test": "node --test",
-    "check": "node --check src/rule-engine.mjs && node --check src/graph-editing.mjs && node --check src/storage.mjs && node --check src/server.mjs && node --check public/app.js && node --check public/history.js && node --check public/graph-editing.js && node --check public/conflict-copy.js && node --check public/rule-transfer.js && node --check public/typed-input.js && node --check public/render-utils.js && node --check public/save-coordination.js"
+    "check": "node --check src/rule-engine.mjs && node --check src/graph-editing.mjs && node --check src/storage.mjs && node --check src/server.mjs && node --check public/app.js && node --check public/history.js && node --check public/graph-editing.js && node --check public/conflict-copy.js && node --check public/rule-transfer.js && node --check public/typed-input.js && node --check public/render-utils.js && node --check public/save-coordination.js && node --check public/router.js"
   },
   "engines": {
     "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "@base-ui/react": "^1.9.0",
+    "@remixicon/react": "^4.9.0",
+    "@tailwindcss/postcss": "^4.3.5",
+    "@tailwindcss/vite": "^4.3.5",
+    "@tanstack/react-table": "^8.21.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "clsx": "^2.1.1",
+    "cn": "^0.5.2",
+    "figma-squircle": "^1.1.0",
+    "flubber": "^0.4.2",
+    "lucide-react": "^1.74.0",
+    "motion": "^14.14.0",
+    "prism-react-renderer": "^2.4.1",
+    "react": "^19.3.1",
+    "react-aria-components": "^1.22.1",
+    "react-dom": "^19.3.1",
+    "react-resizable-panels": "^4.24.1",
+    "sonner": "^2.0.8",
+    "tailwind-merge": "^3.7.0",
+    "tailwindcss": "^4.3.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "shadcn": "^4.23.0"
   }
 }

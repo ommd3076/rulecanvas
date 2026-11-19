@@ -10,6 +10,14 @@ secrets/
 *.bak
 *.corrupt-*
 
+# Dependencies and build outputs
+node_modules/
+dist/
+reports/
+temp-profile/
+temp-browser-profile/
+temp-*/
+
 # Operating-system metadata
 .DS_Store
 Thumbs.db
