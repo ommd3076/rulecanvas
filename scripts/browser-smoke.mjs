@@ -13,6 +13,13 @@ async function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+async function stopChild(child) {
+  if (child.exitCode !== null || child.signalCode !== null || !child.pid) return;
+  const closed = new Promise((resolve) => child.once('close', resolve));
+  child.kill('SIGKILL');
+  await Promise.race([closed, sleep(3000)]);
+}
+
 function getFreePort() {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
@@ -1138,6 +1145,14 @@ async function runSmoke() {
         Buffer.from(ssMobile.data, 'base64')
       );
 
+      console.log('--- Step 7: Persisted project runs on mobile ---');
+      const runHistoryUrl = `${projOverviewUrl}/runs`;
+      await client.navigateTo(runHistoryUrl, { expectedHeading: 'Evaluation runs' });
+      await client.waitForFunction(`() => Array.from(document.querySelectorAll('[role="row"], tr')).some(row => row.textContent.includes('Grouped decision'))`);
+      assert.equal(await client.eval(`window.location.pathname`), new URL(runHistoryUrl).pathname);
+      assert.equal(await client.eval(`document.documentElement.scrollWidth`), 390);
+      console.log('✓ Project runs deep link renders the earlier evaluation without horizontal page overflow');
+
       // Assert zero runtime errors or unhandled exceptions occurred
       assert.equal(
         runtimeExceptions.length,
@@ -1162,12 +1177,13 @@ async function runSmoke() {
       console.log('ALL BROWSER SMOKE ASSERTIONS PASSED WITH ZERO REGRESSIONS!');
       console.log('================================================================');
     } finally {
-      edge.kill('SIGKILL');
-      await fs.rm(tempProfile, { recursive: true, force: true }).catch(() => {});
+      await stopChild(edge);
     }
   } finally {
-    server.kill('SIGKILL');
-    await fs.rm(workspace, { recursive: true, force: true }).catch(() => {});
+    await stopChild(server);
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 8, retryDelay: 200 }).catch((error) => {
+      console.warn(`Could not remove the temporary browser smoke workspace ${workspace}: ${error.message}`);
+    });
   }
 }
 

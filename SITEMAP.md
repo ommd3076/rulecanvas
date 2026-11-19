@@ -6,6 +6,7 @@ RuleCanvas is a local decision workbench for analysts who need to turn rules int
 | --- | --- |
 | `/projects` | Search, open, or create a project |
 | `/projects/:projectId` | List rule sets, create a rule set, inspect project activity |
+| `/projects/:projectId/runs` | Filter retained evaluations, review counts and results, and open saved versions |
 | `/projects/:projectId/rules/:ruleId` | Canvas and properties, validation, draft save, import and export |
 | `/projects/:projectId/rules/:ruleId?panel=schema` | Edit typed inputs |
 | `/projects/:projectId/rules/:ruleId?panel=test` | Enter typed inputs, run the saved draft, inspect the trace |

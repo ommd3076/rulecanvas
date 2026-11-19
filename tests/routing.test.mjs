@@ -27,6 +27,7 @@ test('router parses valid routes and strips trailing slashes', () => {
     type: 'project',
     projectId: 'p1',
   });
+  assert.deepEqual(parseRoute('/projects/project%201/runs'), { type: 'runs', projectId: 'project 1' });
 
   assert.deepEqual(parseRoute('/projects/p1/rules/r1'), {
     type: 'editor',
@@ -91,6 +92,7 @@ test('router decodes and encodes special characters in IDs', () => {
 test('buildRouteUrl generates canonical URLs for all route states', () => {
   assert.equal(buildRouteUrl({ type: 'projects' }), '/projects');
   assert.equal(buildRouteUrl({ type: 'project', projectId: 'proj-1' }), '/projects/proj-1');
+  assert.equal(buildRouteUrl({ type: 'runs', projectId: 'project 1' }), '/projects/project%201/runs');
   assert.equal(
     buildRouteUrl({ type: 'editor', projectId: 'p1', ruleId: 'r1' }),
     '/projects/p1/rules/r1'
@@ -134,6 +136,7 @@ test('server delivers app shell for valid screen routes while preserving 404s fo
     '/',
     '/projects',
     '/projects/00000000-0000-0000-0000-000000000001',
+    '/projects/00000000-0000-0000-0000-000000000001/runs',
     '/projects/00000000-0000-0000-0000-000000000001/rules/00000000-0000-0000-0000-000000000002',
     '/projects/00000000-0000-0000-0000-000000000001/rules/00000000-0000-0000-0000-000000000002?panel=schema',
     '/projects/00000000-0000-0000-0000-000000000001/rules/00000000-0000-0000-0000-000000000002?panel=test',

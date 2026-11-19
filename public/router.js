@@ -3,6 +3,7 @@
  * Matches proposed URLs in SITEMAP.md:
  * - /projects
  * - /projects/:projectId
+ * - /projects/:projectId/runs
  * - /projects/:projectId/rules/:ruleId
  * - /projects/:projectId/rules/:ruleId?panel=schema|test
  * - /projects/:projectId/rules/:ruleId/versions
@@ -55,6 +56,14 @@ export function parseRoute(pathname, search = '') {
 
     if (cleanPath === '/' || cleanPath === '/projects') {
       return { type: 'projects' };
+    }
+
+    // /projects/:projectId/runs
+    const runsMatch = cleanPath.match(/^\/projects\/([^/]+)\/runs$/);
+    if (runsMatch) {
+      const projectId = safeDecodeId(runsMatch[1]);
+      if (!projectId) return { type: 'not_found', path: pathname };
+      return { type: 'runs', projectId };
     }
 
     // /projects/:projectId
@@ -146,6 +155,8 @@ export function buildRouteUrl(route) {
       return '/projects';
     case 'project':
       return `/projects/${encodeURIComponent(route.projectId)}`;
+    case 'runs':
+      return `/projects/${encodeURIComponent(route.projectId)}/runs`;
     case 'editor': {
       const base = `/projects/${encodeURIComponent(route.projectId)}/rules/${encodeURIComponent(route.ruleId)}`;
       if (route.panel && route.panel !== 'properties') {

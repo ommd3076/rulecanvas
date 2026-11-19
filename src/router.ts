@@ -12,6 +12,7 @@ export type PanelType = 'properties' | 'schema' | 'test';
 export type RouteState =
   | { type: 'projects' }
   | { type: 'project'; projectId: string }
+  | { type: 'runs'; projectId: string }
   | { type: 'editor'; projectId: string; ruleId: string; panel?: PanelType }
   | { type: 'versions'; projectId: string; ruleId: string; versionId?: string }
   | { type: 'not_found'; path: string };

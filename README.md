@@ -15,6 +15,7 @@ RuleCanvas by ENNORM is a local visual workbench for analysts who need to explai
 - Define typed input fields (`string`, `number`, `boolean`, `date`, and `enum`), required state, and enum options.
 - Validate branch completeness, edge compatibility, duplicate IDs, missing references, cycles, and unreachable nodes.
 - Evaluate the intended saved revision against typed input and follow a deterministic, ordered node trace.
+- Open **Evaluation runs** from a project to review up to 500 recent evaluations, see their draft revisions or saved versions, and distinguish completed evaluations from evaluation errors. Run history stores outcome labels or error codes and omits submitted inputs, output payloads, and traces.
 - Reject stale concurrent draft writes with a revision conflict instead of silently overwriting.
 - Keep a conflicting unsaved draft in the editor, warn before leaving the page, and offer a local JSON download before reloading the server copy.
 - Export the current draft to versioned JSON and import either a draft export or conflict copy after server-side graph validation.

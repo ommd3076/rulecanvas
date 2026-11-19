@@ -11,6 +11,7 @@ interface ProjectOverviewViewProps {
   onSelectRuleset: (rulesetId: string) => void;
   onOpenVersions: (rulesetId: string, rulesetName: string) => void;
   onNewRuleset: () => void;
+  onOpenRuns: () => void;
 }
 
 export const ProjectOverviewView: React.FC<ProjectOverviewViewProps> = ({
@@ -18,6 +19,7 @@ export const ProjectOverviewView: React.FC<ProjectOverviewViewProps> = ({
   onSelectRuleset,
   onOpenVersions,
   onNewRuleset,
+  onOpenRuns,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const rulesets = project.rulesets || [];
@@ -36,6 +38,7 @@ export const ProjectOverviewView: React.FC<ProjectOverviewViewProps> = ({
           </p>
         </div>
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+          <Button variant="secondary" size="medium" onClick={onOpenRuns}>Evaluation runs</Button>
           {rulesets.length > 0 && <SearchField
             aria-label="Search rule sets"
             placeholder="Find a rule set"

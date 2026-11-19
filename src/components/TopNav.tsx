@@ -16,7 +16,7 @@ import {
 } from '@remixicon/react';
 
 interface TopNavProps {
-  view: 'dashboard' | 'project' | 'editor';
+  view: 'dashboard' | 'project' | 'runs' | 'editor';
   projectName?: string;
   rulesetName?: string;
   activeRevision?: number;
@@ -66,9 +66,10 @@ export const TopNav: React.FC<TopNavProps> = ({
   }
 
   const breadcrumbItems: BreadcrumbDropdownItem[] = [{ label: 'Projects', onClick: onNavigateDashboard }];
-  if (projectName) breadcrumbItems.push({ label: projectName, onClick: view === 'editor' ? onNavigateProject : undefined });
+  if (projectName) breadcrumbItems.push({ label: projectName, onClick: view !== 'project' ? onNavigateProject : undefined });
   if (view === 'editor' && rulesetName) breadcrumbItems.push({ label: rulesetName });
   if (view === 'project') breadcrumbItems.push({ label: 'Rule sets' });
+  if (view === 'runs') breadcrumbItems.push({ label: 'Evaluation runs' });
 
   return (
     <header className="relative z-40 flex h-14 min-h-14 w-full items-center justify-between gap-3 border-b border-separator-border bg-background-primary-default px-3 sm:px-5">

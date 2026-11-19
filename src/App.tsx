@@ -31,6 +31,7 @@ import { TopNav } from './components/TopNav';
 import { DashboardView } from './components/DashboardView';
 import { eligibilityExampleInput } from './example';
 import { ProjectOverviewView } from './components/ProjectOverviewView';
+import { RunsView } from './components/RunsView';
 import { GraphCanvas } from './components/GraphCanvas';
 import { NodeInspector } from './components/NodeInspector';
 import { SchemaEditor } from './components/SchemaEditor';
@@ -80,9 +81,13 @@ export function App() {
   const isStartingGuidedExampleRef = useRef(false);
 
   // Derived View identifier for SaveCoordinator and TopNav
-  const view: 'dashboard' | 'project' | 'editor' =
+  const view: 'dashboard' | 'project' | 'runs' | 'editor' =
     route.type === 'project' || (route.type === 'versions' && returnRouteRef.current?.type === 'project')
       ? 'project'
+      : route.type === 'runs'
+      ? 'runs'
+      : route.type === 'versions' && returnRouteRef.current?.type === 'runs'
+      ? 'runs'
       : route.type === 'editor' || route.type === 'versions'
       ? 'editor'
       : 'dashboard';
@@ -262,7 +267,7 @@ export function App() {
       return;
     }
 
-    if (targetRoute.type === 'project') {
+    if (targetRoute.type === 'project' || targetRoute.type === 'runs') {
       try {
         const res = await api.getProject(targetRoute.projectId);
         if (navigationSeqRef.current !== navId) return;
@@ -872,14 +877,27 @@ export function App() {
                           ruleId: rId,
                         });
                       }}
+                      onOpenRuns={() => navigateTo({ type: 'runs', projectId: currentProject.id })}
                       onNewRuleset={() => setIsCreateRulesetOpen(true)}
                     />
                   </div>
                 )}
 
+              {(route.type === 'runs' || (route.type === 'versions' && returnRouteRef.current?.type === 'runs')) && currentProject && (
+                <div className="h-full w-full overflow-y-auto">
+                  <RunsView
+                    project={currentProject}
+                  onOpenVersion={(rId, versionId) => {
+                    returnRouteRef.current = { type: 'runs', projectId: currentProject.id };
+                    navigateTo({ type: 'versions', projectId: currentProject.id, ruleId: rId, versionId });
+                  }}
+                  />
+                </div>
+              )}
+
               {/* Editor Workspace View */}
               {(route.type === 'editor' ||
-                (route.type === 'versions' && returnRouteRef.current?.type !== 'project')) &&
+                (route.type === 'versions' && returnRouteRef.current?.type !== 'project' && returnRouteRef.current?.type !== 'runs')) &&
                 currentRuleset && (
                 <ResizablePanelGroup orientation="horizontal" className="h-full w-full overflow-hidden">
                   <ResizablePanel id="rule-canvas" defaultSize={isMobileViewport ? '100' : '68'} minSize={isMobileViewport ? 0 : 420} className="relative min-w-0">

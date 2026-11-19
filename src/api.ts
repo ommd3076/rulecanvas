@@ -87,6 +87,20 @@ export interface AuditEvent {
   occurredAt: string;
 }
 
+export interface EvaluationRun {
+  id: string;
+  projectId: string;
+  rulesetId: string;
+  revision: number | null;
+  versionId: string | null;
+  versionNumber: number | null;
+  ok: boolean;
+  outcomeId?: string;
+  outcomeLabel?: string;
+  error?: { code?: string };
+  createdAt: string;
+}
+
 export interface ValidationResult {
   valid: boolean;
   errors: Array<{
@@ -183,4 +197,5 @@ export const api = {
   }),
 
   getAudit: (projectId: string) => request<{ events: AuditEvent[] }>(`/api/projects/${encodeURIComponent(projectId)}/audit`),
+  getProjectRuns: (projectId: string) => request<{ runs: EvaluationRun[] }>(`/api/projects/${encodeURIComponent(projectId)}/runs`),
 };
