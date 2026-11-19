@@ -65,6 +65,8 @@ To opt into the database integration test, point `RULECANVAS_TEST_DATABASE_URL` 
 
 Hosted mode binds to `127.0.0.1` by default. Set `RULECANVAS_HOST` to a private listener IP when the proxy runs separately, and restrict network access to the trusted proxy and health checks. Use `/health/live` for process health and `/health/ready` for PostgreSQL connectivity. Both endpoints return only an `ok` flag and require no tenant identity.
 
+Build the hosted image with `docker build -t rulecanvas-hosted .`. It runs as a non-root user, serves the compiled UI, and listens on port 4178 inside the container. Apply migrations separately, inject the hosted settings at runtime, and keep its port on the proxy's private network.
+
 The visual language incorporates the verified RuleCanvas design system:
 - **Workspace navigation:** Project and rule breadcrumbs, draft save state, version history, and a compact actions menu on narrow screens. The [sitemap](SITEMAP.md) lists the deep links for each workspace view.
 - **Three-Zone Workspace:**
@@ -93,9 +95,9 @@ Graphs use one `start` node, `condition` nodes, `group` nodes, and terminal `out
 
 ## Next gates
 
-1. Decide and implement authenticated actors, durable shared persistence, approval rules, and authorization before any hosted multi-user release.
-2. Add API abuse limits and cross-process locking before treating the local server as a shared backend.
-3. Expanded cross-browser and assistive technology audits for formal accessibility certification.
+1. Deploy the hosted image behind an authorized identity proxy with managed PostgreSQL and verify it using synthetic accounts.
+2. Verify ingress rate limits, production observability, and database backup and restore before admitting customer data.
+3. Expand cross-browser and assistive technology coverage for a formal accessibility audit.
 
 ## License
 
