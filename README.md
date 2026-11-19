@@ -63,6 +63,8 @@ When the hosted integration supplies `resolveReleaseRoles`, `GET /api/rulesets/:
 
 To opt into the database integration test, point `RULECANVAS_TEST_DATABASE_URL` at a disposable PostgreSQL test database. The test never uses the hosted application's database environment variable.
 
+Hosted mode binds to `127.0.0.1` by default. Set `RULECANVAS_HOST` to a private listener IP when the proxy runs separately, and restrict network access to the trusted proxy and health checks. Use `/health/live` for process health and `/health/ready` for PostgreSQL connectivity. Both endpoints return only an `ok` flag and require no tenant identity.
+
 The visual language incorporates the verified RuleCanvas design system:
 - **Workspace navigation:** Project and rule breadcrumbs, draft save state, version history, and a compact actions menu on narrow screens. The [sitemap](SITEMAP.md) lists the deep links for each workspace view.
 - **Three-Zone Workspace:**

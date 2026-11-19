@@ -25,10 +25,12 @@ async function startServer(t, optionsFor = (directory) => ({ store: new JsonStor
 
 test('hosted API requires a signed identity and confines requests to the authorized store', async (t) => {
   const key = Buffer.alloc(32, 7);
+  let ready = true;
   const base = await startServer(t, (directory) => {
     const stores = new Map(['alice', 'bob'].map((subject) => [subject, new JsonStore(join(directory, `${subject}.json`))]));
     return { hosted: {
       assertion: { secret: key, issuer: 'test-proxy', audience: 'rulecanvas', now: 100 },
+      checkReadiness: async () => { if (!ready) throw new Error('Database unavailable'); },
       resolveAuthorizedStore: ({ principal, method }) => method === 'POST' && principal.subject === 'bob' ? null : stores.get(principal.subject),
     } };
   });
@@ -39,6 +41,11 @@ test('hosted API requires a signed identity and confines requests to the authori
   };
 
   const anonymous = await jsonRequest(base, '/api/projects', { headers: { 'x-forwarded-user': 'alice' } });
+  assert.deepEqual(await jsonRequest(base, '/health/live'), { status: 200, body: { ok: true } });
+  assert.deepEqual(await jsonRequest(base, '/health/ready'), { status: 200, body: { ok: true } });
+  ready = false;
+  assert.deepEqual(await jsonRequest(base, '/health/ready'), { status: 503, body: { ok: false } });
+  assert.deepEqual(await jsonRequest(base, '/health/live'), { status: 200, body: { ok: true } });
   assert.equal(anonymous.status, 401);
   assert.equal((await jsonRequest(base, '/api/health')).status, 401);
   assert.equal((await jsonRequest(base, '/api/projects', { headers: authorize('stranger') })).status, 403);

@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { isIP } from 'node:net';
 import { createRuleCanvasServer } from './server.mjs';
 import { JsonStore } from './storage.mjs';
 import { createHostedMembership } from './hosted-membership.mjs';
@@ -18,12 +19,14 @@ function readConfig(env) {
   }
   const port = Number(env.PORT ?? 4178);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be a valid TCP port.');
-  return { databaseUrl, port, assertion: { secret, issuer, audience, requireTenant: true } };
+  const host = env.RULECANVAS_HOST ?? '127.0.0.1';
+  if (!isIP(host)) throw new Error('RULECANVAS_HOST must be an IPv4 or IPv6 address.');
+  return { databaseUrl, host, port, assertion: { secret, issuer, audience, requireTenant: true } };
 }
 
 let pool;
 try {
-  const { databaseUrl, port, assertion } = readConfig(process.env);
+  const { databaseUrl, host, port, assertion } = readConfig(process.env);
   pool = new pg.Pool({ connectionString: databaseUrl, connectionTimeoutMillis: 5000 });
   pool.on('error', () => process.stderr.write('RuleCanvas database connection lost.\n'));
   const { rows: [schema] } = await pool.query("SELECT to_regclass('rulecanvas_workspaces') AS workspaces, to_regclass('public.hosted_tenant_memberships') AS memberships");
@@ -32,12 +35,13 @@ try {
     pool,
     storeForTenant: (tenantId) => new JsonStore(null, createPostgresWorkspaceBackend({ pool, tenantId })),
   });
-  const server = createRuleCanvasServer({ hosted: { assertion, storageType: 'postgres', ...membership } });
+  const checkReadiness = async () => { await pool.query({ text: 'SELECT 1', query_timeout: 2000 }); };
+  const server = createRuleCanvasServer({ hosted: { assertion, storageType: 'postgres', checkReadiness, ...membership } });
   await new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(port, '127.0.0.1', resolve);
+    server.listen(port, host, resolve);
   });
-  process.stdout.write(`RuleCanvas hosted API listening on http://127.0.0.1:${port}\n`);
+  process.stdout.write(`RuleCanvas hosted API listening on ${host}, port ${port}\n`);
   const stop = () => server.close(() => { void pool.end(); });
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);

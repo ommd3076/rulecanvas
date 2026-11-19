@@ -177,6 +177,20 @@ export function createRuleCanvasServer({ store: localStore, hosted } = {}) {
     }
     const method = request.method;
     try {
+      if (hosted && method === 'GET' && url.pathname === '/health/live') {
+        sendJson(response, 200, { ok: true });
+        return;
+      }
+      if (hosted && method === 'GET' && url.pathname === '/health/ready') {
+        try {
+          if (typeof hosted.checkReadiness !== 'function') throw new Error('Readiness check is unavailable.');
+          await hosted.checkReadiness();
+          sendJson(response, 200, { ok: true });
+        } catch {
+          sendJson(response, 503, { ok: false });
+        }
+        return;
+      }
       let store = localStore;
       let principal;
       if (hosted && (url.pathname === '/api' || url.pathname.startsWith('/api/'))) {
