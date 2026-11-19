@@ -61,6 +61,72 @@ async function jsonRequest(base, path, options = {}) {
   return { status: response.status, body: await response.json() };
 }
 
+test('hosted release actions use stored versions and server-assigned roles', async (t) => {
+  const secret = Buffer.alloc(32, 9);
+  const memberRoles = new Map([['author', ['author']], ['reviewer', ['reviewer']], ['deployer', ['deployer']]]);
+  let releaseStoreFile;
+  const base = await startServer(t, (directory) => {
+    releaseStoreFile = join(directory, 'releases.json');
+    const store = new JsonStore(releaseStoreFile);
+    return { hosted: {
+      assertion: { secret, issuer: 'test-proxy', audience: 'rulecanvas', now: 100 },
+      resolveAuthorizedStore: ({ principal }) => memberRoles.has(principal.subject) ? store : null,
+      resolveReleaseRoles: ({ principal }) => memberRoles.get(principal.subject),
+    } };
+  });
+  const authorize = (subject) => {
+    const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+    const message = `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode({ iss: 'test-proxy', aud: 'rulecanvas', sub: subject, iat: 90, exp: 120 })}`;
+    return { 'x-rulecanvas-assertion': `${message}.${createHmac('sha256', secret).update(message).digest('base64url')}` };
+  };
+  const post = (path, fields, subject = 'author', method = 'POST') => jsonRequest(base, path, {
+    method, body: JSON.stringify(fields), headers: authorize(subject),
+  });
+  const project = (await post('/api/projects', { name: 'Governed releases' })).body.project;
+  const rulesetsPath = `/api/projects/${project.id}/rulesets`;
+  const ruleset = (await post(rulesetsPath, { name: 'Decision' })).body.ruleset;
+  const rulePath = `/api/rulesets/${ruleset.id}`;
+  await post(rulePath, { expectedRevision: ruleset.revision, graph: validGraph(), name: ruleset.name }, 'author', 'PUT');
+  const version = (await post(`${rulePath}/versions`, { expectedRevision: ruleset.revision + 1 })).body.version;
+  const releases = `${rulePath}/releases`;
+  const runtime = `${releases}/production/evaluate`;
+  const selected = { versionId: version.id, versionHash: version.graphHash, rationale: 'Validated against documented sample inputs' };
+
+  assert.equal((await post(runtime, { input: { score: 8 } })).status, 404);
+  assert.equal((await post(releases, { ...selected, action: 'propose', versionId: '00000000-0000-0000-0000-000000000000' })).status, 404);
+  assert.equal((await post(releases, { ...selected, action: 'propose', versionHash: 'f'.repeat(64) })).status, 409);
+  assert.equal((await post(releases, { ...selected, action: 'propose' })).status, 200);
+  assert.equal((await post(releases, { ...selected, action: 'approve', actor: { id: 'reviewer', roles: ['reviewer'] } })).status, 403);
+  assert.equal((await post(releases, { ...selected, action: 'approve' }, 'reviewer')).status, 200);
+  const activation = { ...selected, action: 'activate', environment: 'production', expectedActiveVersionId: null };
+  assert.equal((await post(releases, activation, 'deployer')).status, 200);
+  assert.equal((await post(releases, activation, 'deployer')).status, 409);
+
+  const nextGraph = validGraph();
+  nextGraph.nodes.find((node) => node.id === 'score-check').value = 9;
+  assert.equal((await post(rulePath, { expectedRevision: ruleset.revision + 1, graph: nextGraph, name: ruleset.name }, 'author', 'PUT')).status, 200);
+  const nextVersion = (await post(`${rulePath}/versions`, { expectedRevision: ruleset.revision + 2 })).body.version;
+  const beforeActivation = await post(runtime, { input: { score: 8 } });
+  assert.equal(beforeActivation.body.version.id, version.id);
+  assert.equal(beforeActivation.body.result.decision, 'eligible');
+  const next = { ...selected, versionId: nextVersion.id, versionHash: nextVersion.graphHash };
+  assert.equal((await post(releases, { ...next, action: 'propose' })).status, 200);
+  assert.equal((await post(releases, { ...next, action: 'approve' }, 'reviewer')).status, 200);
+  assert.equal((await post(releases, { ...activation, ...next, expectedActiveVersionId: version.id }, 'deployer')).status, 200);
+  const afterActivation = await post(runtime, { input: { score: 8 } });
+  assert.equal(afterActivation.body.version.id, nextVersion.id);
+  assert.equal(afterActivation.body.result.decision, 'review');
+  assert.equal((await post(releases, { ...activation, action: 'rollback', expectedActiveVersionId: nextVersion.id }, 'deployer')).status, 200);
+  const afterRollback = await post(runtime, { input: { score: 8 } });
+  assert.equal(afterRollback.body.version.id, version.id);
+  assert.equal(afterRollback.body.result.decision, 'eligible');
+  const policy = await jsonRequest(base, releases, { headers: authorize('reviewer') });
+  assert.equal(policy.status, 200);
+  assert.match(JSON.stringify(policy.body.policy), new RegExp(version.id));
+  const reopened = new JsonStore(releaseStoreFile);
+  assert.equal((await reopened.getActiveReleaseVersion(ruleset.id, 'production')).id, version.id);
+});
+
 test('creates and reloads a project and ruleset through the local HTTP API', async (t) => {
   const base = await startServer(t);
   const createdProject = await jsonRequest(base, '/api/projects', {

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { evaluateGraph, validateGraph } from './rule-engine.mjs';
 import { JsonStore, StoreError } from './storage.mjs';
 import { HostedAuthError, verifyRequestAssertion } from './hosted-auth.mjs';
+import { ReleasePolicyError } from './release-policy.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const distDirectory = resolve(root, 'dist');
@@ -177,13 +178,17 @@ export function createRuleCanvasServer({ store: localStore, hosted } = {}) {
     const method = request.method;
     try {
       let store = localStore;
+      let principal;
       if (hosted && (url.pathname === '/api' || url.pathname.startsWith('/api/'))) {
-        const principal = verifyRequestAssertion(request, hosted.assertion);
+        principal = verifyRequestAssertion(request, hosted.assertion);
         store = await hosted.resolveAuthorizedStore({ principal, method, pathname: url.pathname });
         if (!store) throw new HostedAuthError('auth.denied', 403);
       }
       if (url.pathname === '/api/health' && method === 'GET') {
-        sendJson(response, 200, { ok: true, storage: 'local-json', recovered: store.wasRecovered?.() ?? false });
+        sendJson(response, 200, {
+          ok: true, storage: 'local-json', recovered: store.wasRecovered?.() ?? false,
+          ...(typeof hosted?.resolveReleaseRoles === 'function' ? { releaseManagement: true } : {}),
+        });
         return;
       }
       if (url.pathname === '/api/projects' && method === 'GET') {
@@ -261,6 +266,35 @@ export function createRuleCanvasServer({ store: localStore, hosted } = {}) {
         sendJson(response, 200, { events: await store.listAuditEvents(match[1]) });
         return;
       }
+      match = url.pathname.match(/^\/api\/rulesets\/([0-9a-f-]+)\/releases(?:\/([a-z0-9-]+)\/evaluate)?$/i);
+      if (match && (method === 'POST' || (method === 'GET' && !match[2])) && typeof hosted?.resolveReleaseRoles === 'function') {
+        const rulesetId = match[1];
+        const roles = await hosted.resolveReleaseRoles({ principal, store, rulesetId });
+        if (!Array.isArray(roles) || roles.length === 0) throw new HostedAuthError('auth.denied', 403);
+        if (method === 'GET') {
+          sendJson(response, 200, { policy: await store.getReleasePolicy(rulesetId), roles });
+          return;
+        }
+        const body = await readBody(request);
+        if (match[2]) {
+          const environment = match[2].toLowerCase();
+          const version = await store.getActiveReleaseVersion(rulesetId, environment);
+          const result = evaluateGraph(version.graph, body.input);
+          await persistEvaluationRun(store, version.graph, result, {
+            projectId: version.projectId, rulesetId, revision: version.sourceRevision,
+            versionId: version.id, versionNumber: version.versionNumber,
+          });
+          sendJson(response, 200, { environment, version: { id: version.id, versionNumber: version.versionNumber, graphHash: version.graphHash }, ...result });
+          return;
+        }
+        const { action, versionId, versionHash, environment, expectedActiveVersionId, rationale } = body;
+        const policy = await store.transitionReleasePolicy({
+          action, rulesetId, versionId, versionHash, environment, expectedActiveVersionId, rationale,
+          actor: { id: principal.subject, roles },
+        });
+        sendJson(response, 200, { policy, roles });
+        return;
+      }
       match = url.pathname.match(/^\/api\/rulesets\/([0-9a-f-]+)\/(validate|evaluate)$/i);
       if (match && method === 'POST') {
         const body = await readBody(request);
@@ -297,6 +331,10 @@ export function createRuleCanvasServer({ store: localStore, hosted } = {}) {
         const code = status === 401 ? 'auth.required' : status === 403 ? 'auth.denied' : 'server.error';
         const message = status === 401 ? 'Authentication required.' : status === 403 ? 'Access denied.' : 'The request could not be completed.';
         sendJson(response, status, { error: { code, message } });
+        return;
+      }
+      if (error instanceof ReleasePolicyError) {
+        sendJson(response, error.status, { error: { code: error.code, message: error.message } });
         return;
       }
       const isMalformed = error instanceof URIError || error.code === 'ERR_INVALID_URL';

@@ -3,10 +3,18 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { createStarterGraph, validateGraph } from './rule-engine.mjs';
 import { createEligibilityExampleGraph } from './example-graph.mjs';
+import { activateRelease, approveRelease, createReleasePolicyState, getDeployment, getRelease, proposeRelease, rejectRelease, rollbackRelease } from './release-policy.mjs';
 
 const STORE_SCHEMA_VERSION = 1;
 const GUIDED_EXAMPLE_KEY = 'eligibility-v1';
 const MAX_EVALUATION_RUNS_PER_PROJECT = 500;
+const releaseTransitions = new Map([
+  ['propose', proposeRelease],
+  ['approve', approveRelease],
+  ['reject', rejectRelease],
+  ['activate', activateRelease],
+  ['rollback', rollbackRelease],
+]);
 
 export class StoreError extends Error {
   constructor(message, status = 400, code = 'store.error', details = undefined) {
@@ -42,7 +50,7 @@ function parseStoreContents(contents) {
   if (!Number.isInteger(sourceVersion) || sourceVersion < 0 || sourceVersion > STORE_SCHEMA_VERSION) {
     throw new StoreError(`Local workspace schema version ${String(sourceVersion)} is not supported. The file was left untouched.`, 503, 'storage.version');
   }
-  const keys = ['projects', 'rulesets', 'versions', 'auditEvents', 'evaluationRuns'];
+  const keys = ['projects', 'rulesets', 'versions', 'auditEvents', 'evaluationRuns', 'releasePolicies'];
   const requiredKeys = sourceVersion === 0 ? ['projects', 'rulesets'] : ['projects', 'rulesets', 'versions', 'auditEvents'];
   for (const key of keys) {
     if (requiredKeys.includes(key) ? !Array.isArray(stored[key]) : stored[key] !== undefined && !Array.isArray(stored[key])) {
@@ -56,6 +64,7 @@ function parseStoreContents(contents) {
     versions: stored.versions ?? [],
     auditEvents: stored.auditEvents ?? [],
     evaluationRuns: stored.evaluationRuns ?? [],
+    releasePolicies: stored.releasePolicies ?? [],
   };
 }
 
@@ -84,7 +93,7 @@ export class JsonStore {
     try {
       contents = await readFile(this.#file, 'utf8');
     } catch (error) {
-      if (error.code === 'ENOENT') return { schemaVersion: STORE_SCHEMA_VERSION, projects: [], rulesets: [], versions: [], auditEvents: [], evaluationRuns: [] };
+      if (error.code === 'ENOENT') return { schemaVersion: STORE_SCHEMA_VERSION, projects: [], rulesets: [], versions: [], auditEvents: [], evaluationRuns: [], releasePolicies: [] };
       throw error;
     }
     try {
@@ -366,6 +375,51 @@ export class JsonStore {
     return data.auditEvents
       .filter((event) => event.projectId === projectId && (!rulesetId || event.rulesetId === rulesetId))
       .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+  }
+
+  async getReleasePolicy(rulesetId) {
+    const data = await this.#read();
+    if (!data.rulesets.some((item) => item.id === rulesetId)) throw new StoreError('Ruleset not found.', 404, 'ruleset.not_found');
+    return data.releasePolicies.find((item) => item.rulesetId === rulesetId)?.state ?? createReleasePolicyState();
+  }
+
+  async getActiveReleaseVersion(rulesetId, environment) {
+    const data = await this.#read();
+    const ruleset = data.rulesets.find((item) => item.id === rulesetId);
+    if (!ruleset) throw new StoreError('Ruleset not found.', 404, 'ruleset.not_found');
+    const state = data.releasePolicies.find((item) => item.rulesetId === rulesetId)?.state ?? createReleasePolicyState();
+    const deployment = getDeployment(state, rulesetId, environment);
+    if (!deployment) throw new StoreError('No version is active in this environment.', 404, 'release.inactive');
+    const version = data.versions.find((item) => item.id === deployment.versionId && item.rulesetId === rulesetId && item.projectId === ruleset.projectId);
+    const release = getRelease(state, rulesetId, deployment.versionId);
+    if (!version || release?.status !== 'approved' || release.graphHash !== version.graphHash || deployment.versionHash !== version.graphHash) {
+      throw new StoreError('Active version record could not be verified.', 409, 'release.integrity');
+    }
+    assertVersionIntegrity(version);
+    return version;
+  }
+
+  async transitionReleasePolicy({ action, rulesetId, versionId, versionHash, environment, expectedActiveVersionId, rationale, actor }) {
+    const transition = releaseTransitions.get(action);
+    if (!transition) throw new StoreError('Unknown release action.', 422, 'release.action');
+
+    return this.#transact((data) => {
+      const ruleset = data.rulesets.find((item) => item.id === rulesetId);
+      if (!ruleset) throw new StoreError('Ruleset not found.', 404, 'ruleset.not_found');
+      const version = data.versions.find((item) => item.id === versionId && item.rulesetId === rulesetId && item.projectId === ruleset.projectId);
+      if (!version) throw new StoreError('Saved version not found.', 404, 'version.not_found');
+      assertVersionIntegrity(version);
+      if (versionHash !== version.graphHash) throw new StoreError('The saved version hash does not match the requested release.', 409, 'release.hash_mismatch');
+
+      const existing = data.releasePolicies.find((item) => item.rulesetId === rulesetId);
+      const state = transition(existing?.state ?? createReleasePolicyState(), {
+        version, rulesetId, versionId, versionHash, environment, expectedActiveVersionId, rationale, actor,
+        timestamp: new Date().toISOString(),
+      });
+      if (existing) existing.state = state;
+      else data.releasePolicies.push({ rulesetId, state });
+      return state;
+    });
   }
 
   async recordEvaluationRun({ projectId, rulesetId, revision, versionId = null, versionNumber = null, ok, outcomeId = null, outcomeLabel = null, errorCode = null }) {

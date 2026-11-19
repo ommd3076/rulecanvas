@@ -52,6 +52,8 @@ This is a local single-user prototype. Version records and the event ledger are 
 
 The server factory also has an integration seam for a trusted authentication proxy. When called with `hosted`, every API request requires a short-lived signed assertion and an application-supplied `resolveAuthorizedStore` callback. That callback receives the verified principal and must enforce membership and permissions and select the tenant's scoped store. The standard `npm start` command uses the local configuration. A production deployment still requires a configured ingress, durable tenant storage, and operational testing.
 
+When the hosted integration supplies `resolveReleaseRoles`, `GET /api/rulesets/:id/releases` reads release history and `POST` to the same URL accepts `propose`, `approve`, `reject`, `activate`, or `rollback`. The server supplies the actor from the signed identity and resolves the version from the authorized store. Activation and rollback require the expected active version ID (`null` when empty). `POST /api/rulesets/:id/releases/:environment/evaluate` evaluates the environment's active immutable graph and reports its version. The release routes require hosted configuration and server-assigned roles.
+
 The visual language incorporates the verified RuleCanvas design system:
 - **Workspace navigation:** Project and rule breadcrumbs, draft save state, version history, and a compact actions menu on narrow screens. The [sitemap](SITEMAP.md) lists the deep links for each workspace view.
 - **Three-Zone Workspace:**
