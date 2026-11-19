@@ -6,6 +6,7 @@ import { createEligibilityExampleGraph } from './example-graph.mjs';
 
 const STORE_SCHEMA_VERSION = 1;
 const GUIDED_EXAMPLE_KEY = 'eligibility-v1';
+const MAX_EVALUATION_RUNS_PER_PROJECT = 500;
 
 export class StoreError extends Error {
   constructor(message, status = 400, code = 'store.error', details = undefined) {
@@ -41,8 +42,8 @@ function parseStoreContents(contents) {
   if (!Number.isInteger(sourceVersion) || sourceVersion < 0 || sourceVersion > STORE_SCHEMA_VERSION) {
     throw new StoreError(`Local workspace schema version ${String(sourceVersion)} is not supported. The file was left untouched.`, 503, 'storage.version');
   }
-  const keys = ['projects', 'rulesets', 'versions', 'auditEvents'];
-  const requiredKeys = sourceVersion === 0 ? ['projects', 'rulesets'] : keys;
+  const keys = ['projects', 'rulesets', 'versions', 'auditEvents', 'evaluationRuns'];
+  const requiredKeys = sourceVersion === 0 ? ['projects', 'rulesets'] : ['projects', 'rulesets', 'versions', 'auditEvents'];
   for (const key of keys) {
     if (requiredKeys.includes(key) ? !Array.isArray(stored[key]) : stored[key] !== undefined && !Array.isArray(stored[key])) {
       throw new StoreError(`Local workspace ${key} data has an invalid shape.`, 503, 'storage.corrupt');
@@ -54,6 +55,7 @@ function parseStoreContents(contents) {
     rulesets: stored.rulesets ?? [],
     versions: stored.versions ?? [],
     auditEvents: stored.auditEvents ?? [],
+    evaluationRuns: stored.evaluationRuns ?? [],
   };
 }
 
@@ -82,7 +84,7 @@ export class JsonStore {
     try {
       contents = await readFile(this.#file, 'utf8');
     } catch (error) {
-      if (error.code === 'ENOENT') return { schemaVersion: STORE_SCHEMA_VERSION, projects: [], rulesets: [], versions: [], auditEvents: [] };
+      if (error.code === 'ENOENT') return { schemaVersion: STORE_SCHEMA_VERSION, projects: [], rulesets: [], versions: [], auditEvents: [], evaluationRuns: [] };
       throw error;
     }
     try {
@@ -364,5 +366,56 @@ export class JsonStore {
     return data.auditEvents
       .filter((event) => event.projectId === projectId && (!rulesetId || event.rulesetId === rulesetId))
       .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+  }
+
+  async recordEvaluationRun({ projectId, rulesetId, revision, versionId = null, versionNumber = null, ok, outcomeId = null, outcomeLabel = null, errorCode = null }) {
+    return this.#transact((data) => {
+      const ruleset = data.rulesets.find((item) => item.id === rulesetId && item.projectId === projectId);
+      if (!ruleset) throw new StoreError('Ruleset not found in this project.', 404, 'ruleset.not_found');
+      if (!Number.isInteger(revision) || revision < 1 || typeof ok !== 'boolean') {
+        throw new StoreError('Evaluation run metadata is invalid.', 422, 'evaluation.run_shape');
+      }
+      if (versionId !== null) {
+        const version = data.versions.find((item) => item.id === versionId && item.rulesetId === rulesetId && item.projectId === projectId);
+        if (!version || version.versionNumber !== versionNumber || version.sourceRevision !== revision) {
+          throw new StoreError('Evaluation version metadata is inconsistent.', 409, 'evaluation.version_mismatch');
+        }
+      } else if (versionNumber !== null) {
+        throw new StoreError('Draft runs cannot include a version number.', 422, 'evaluation.run_shape');
+      }
+
+      const run = {
+        id: randomUUID(),
+        projectId,
+        rulesetId,
+        revision,
+        versionId,
+        versionNumber,
+        ok,
+        ...(ok
+          ? { ...(outcomeId ? { outcomeId } : {}), ...(outcomeLabel ? { outcomeLabel } : {}) }
+          : { error: { code: typeof errorCode === 'string' && /^[a-z0-9_.-]{1,80}$/i.test(errorCode) ? errorCode : 'evaluation.failed' } }),
+        createdAt: new Date().toISOString(),
+      };
+      data.evaluationRuns.push(run);
+      const projectRuns = data.evaluationRuns
+        .map((item, index) => ({ item, index }))
+        .filter(({ item }) => item.projectId === projectId)
+        .sort((a, b) => b.item.createdAt.localeCompare(a.item.createdAt) || b.index - a.index);
+      const retainedIds = new Set(projectRuns.slice(0, MAX_EVALUATION_RUNS_PER_PROJECT).map(({ item }) => item.id));
+      data.evaluationRuns = data.evaluationRuns.filter((item) => item.projectId !== projectId || retainedIds.has(item.id));
+      return run;
+    });
+  }
+
+  async listEvaluationRuns(projectId) {
+    const data = await this.#read();
+    if (!data.projects.some((item) => item.id === projectId)) throw new StoreError('Project not found.', 404, 'project.not_found');
+    return data.evaluationRuns
+      .map((run, index) => ({ run, index }))
+      .filter(({ run }) => run.projectId === projectId)
+      .sort((a, b) => b.run.createdAt.localeCompare(a.run.createdAt) || b.index - a.index)
+      .slice(0, MAX_EVALUATION_RUNS_PER_PROJECT)
+      .map(({ run }) => run);
   }
 }

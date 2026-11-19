@@ -29,6 +29,19 @@ function sendJson(response, status, body) {
   response.end(JSON.stringify(body));
 }
 
+async function persistEvaluationRun(store, graph, result, metadata) {
+  const outcomeNode = result.outcomeId
+    ? graph.nodes.find((node) => node.id === result.outcomeId && node.type === 'outcome')
+    : null;
+  return store.recordEvaluationRun({
+    ...metadata,
+    ok: result.ok === true,
+    outcomeId: outcomeNode?.id ?? null,
+    outcomeLabel: outcomeNode?.label ?? null,
+    errorCode: result.ok === true ? null : result.errors?.[0]?.code,
+  });
+}
+
 function readBody(request) {
   return new Promise((resolveBody, reject) => {
     let size = 0;
@@ -216,7 +229,20 @@ export function createRuleCanvasServer({ store = new JsonStore() } = {}) {
       if (match && method === 'POST' && match[3] === 'evaluate') {
         const version = await store.getVersion(match[1], match[2]);
         const body = await readBody(request);
-        sendJson(response, 200, { version: { id: version.id, versionNumber: version.versionNumber, graphHash: version.graphHash }, ...evaluateGraph(version.graph, body.input) });
+        const result = evaluateGraph(version.graph, body.input);
+        await persistEvaluationRun(store, version.graph, result, {
+          projectId: version.projectId,
+          rulesetId: version.rulesetId,
+          revision: version.sourceRevision,
+          versionId: version.id,
+          versionNumber: version.versionNumber,
+        });
+        sendJson(response, 200, { version: { id: version.id, versionNumber: version.versionNumber, graphHash: version.graphHash }, ...result });
+        return;
+      }
+      match = url.pathname.match(/^\/api\/projects\/([0-9a-f-]+)\/runs$/i);
+      if (match && method === 'GET') {
+        sendJson(response, 200, { runs: await store.listEvaluationRuns(match[1]) });
         return;
       }
       match = url.pathname.match(/^\/api\/projects\/([0-9a-f-]+)\/audit$/i);
@@ -235,7 +261,13 @@ export function createRuleCanvasServer({ store = new JsonStore() } = {}) {
         if (body.expectedRevision !== undefined && body.expectedRevision !== ruleset.revision) {
           throw new StoreError('The saved draft changed. Reload the rule set before running the test again.', 409, 'evaluation.revision_conflict');
         }
-        sendJson(response, 200, evaluateGraph(ruleset.graph, body.input));
+        const result = evaluateGraph(ruleset.graph, body.input);
+        await persistEvaluationRun(store, ruleset.graph, result, {
+          projectId: ruleset.projectId,
+          rulesetId: ruleset.id,
+          revision: ruleset.revision,
+        });
+        sendJson(response, 200, result);
         return;
       }
       if (url.pathname.startsWith('/api/')) {

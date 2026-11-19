@@ -105,6 +105,89 @@ test('guided example creation is atomic and idempotent across concurrent request
   assert.deepEqual(audit.body.events.map((event) => event.type).sort(), ['project.created', 'ruleset.created']);
 });
 
+test('records draft and immutable-version evaluations as project-scoped summaries without inputs or traces', async (t) => {
+  const base = await startServer(t);
+  const firstProject = (await jsonRequest(base, '/api/projects', {
+    method: 'POST', body: JSON.stringify({ name: 'Run History A' }),
+  })).body.project;
+  const secondProject = (await jsonRequest(base, '/api/projects', {
+    method: 'POST', body: JSON.stringify({ name: 'Run History B' }),
+  })).body.project;
+  const ruleset = (await jsonRequest(base, `/api/projects/${firstProject.id}/rulesets`, {
+    method: 'POST', body: JSON.stringify({ name: 'Eligibility' }),
+  })).body.ruleset;
+
+  assert.deepEqual((await jsonRequest(base, `/api/projects/${firstProject.id}/runs`)).body.runs, []);
+  const saved = await jsonRequest(base, `/api/rulesets/${ruleset.id}`, {
+    method: 'PUT', body: JSON.stringify({ expectedRevision: 1, name: ruleset.name, graph: validGraph() }),
+  });
+  assert.equal(saved.body.ruleset.revision, 2);
+
+  const draftRun = await jsonRequest(base, `/api/rulesets/${ruleset.id}/evaluate`, {
+    method: 'POST', body: JSON.stringify({ input: { score: 8, tier: 'priority' }, expectedRevision: 2 }),
+  });
+  assert.equal(draftRun.body.ok, true);
+  await new Promise((resolve) => setTimeout(resolve, 2));
+  const failedRun = await jsonRequest(base, `/api/rulesets/${ruleset.id}/evaluate`, {
+    method: 'POST', body: JSON.stringify({ input: { score: 'not-a-number' }, expectedRevision: 2 }),
+  });
+  assert.equal(failedRun.body.ok, false);
+  const createdVersion = await jsonRequest(base, `/api/rulesets/${ruleset.id}/versions`, {
+    method: 'POST', body: JSON.stringify({ expectedRevision: 2 }),
+  });
+  assert.equal(createdVersion.status, 201);
+  await new Promise((resolve) => setTimeout(resolve, 2));
+  const version = createdVersion.body.version;
+  const versionRun = await jsonRequest(base, `/api/rulesets/${ruleset.id}/versions/${version.id}/evaluate`, {
+    method: 'POST', body: JSON.stringify({ input: { score: 8, tier: 'priority' } }),
+  });
+  assert.equal(versionRun.body.ok, true);
+
+  const runsResponse = await jsonRequest(base, `/api/projects/${firstProject.id}/runs`);
+  assert.equal(runsResponse.status, 200);
+  const [latest, failure, draft] = runsResponse.body.runs;
+  assert.equal(runsResponse.body.runs.length, 3);
+  assert.equal(latest.versionId, version.id);
+  assert.equal(latest.versionNumber, version.versionNumber);
+  assert.equal(latest.revision, 2);
+  assert.deepEqual(failure.error, { code: 'input.type' });
+  assert.equal(failure.ok, false);
+  assert.equal(draft.versionId, null);
+  assert.equal(draft.revision, 2);
+  for (const run of runsResponse.body.runs) {
+    assert.equal(run.projectId, firstProject.id);
+    assert.equal(run.rulesetId, ruleset.id);
+    assert.equal(typeof run.createdAt, 'string');
+    assert.equal(Object.hasOwn(run, 'input'), false);
+    assert.equal(Object.hasOwn(run, 'trace'), false);
+    assert.equal(Object.hasOwn(run, 'result'), false);
+  }
+  assert.deepEqual((await jsonRequest(base, `/api/projects/${secondProject.id}/runs`)).body.runs, []);
+});
+
+test('caps each project evaluation history at the newest 500 runs', async (t) => {
+  const base = await startServer(t);
+  const project = (await jsonRequest(base, '/api/projects', {
+    method: 'POST', body: JSON.stringify({ name: 'Bounded Runs' }),
+  })).body.project;
+  const ruleset = (await jsonRequest(base, `/api/projects/${project.id}/rulesets`, {
+    method: 'POST', body: JSON.stringify({ name: 'Eligibility' }),
+  })).body.ruleset;
+  const saved = await jsonRequest(base, `/api/rulesets/${ruleset.id}`, {
+    method: 'PUT', body: JSON.stringify({ expectedRevision: 1, name: ruleset.name, graph: validGraph() }),
+  });
+  assert.equal(saved.status, 200);
+  const body = JSON.stringify({ input: { score: 8 }, expectedRevision: 2 });
+  for (let index = 0; index < 501; index += 1) {
+    const response = await jsonRequest(base, `/api/rulesets/${ruleset.id}/evaluate`, { method: 'POST', body });
+    assert.equal(response.status, 200);
+  }
+  const history = await jsonRequest(base, `/api/projects/${project.id}/runs`);
+  assert.equal(history.body.runs.length, 500);
+  assert.ok(history.body.runs.every((run) => run.projectId === project.id));
+  assert.ok(history.body.runs.every((run) => run.rulesetId === ruleset.id));
+});
+
 test('persists nested AND OR groups and replays their typed evaluation trace', async (t) => {
   const base = await startServer(t);
   const project = (await jsonRequest(base, '/api/projects', { method: 'POST', body: JSON.stringify({ name: 'Grouped rules' }) })).body.project;
