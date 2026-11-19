@@ -285,7 +285,7 @@ function renderEditorHeaderState() {
     } else if (state.dirty) {
       status.textContent = 'Unsaved changes';
     } else {
-      status.innerHTML = `Saved · <button type="button" class="version-tag" data-action="versions" title="View version history">v${escapeHtml(String(state.revision))}</button>`;
+      status.innerHTML = `Saved · <button type="button" class="version-tag" data-action="versions" title="View saved versions">Rev ${escapeHtml(String(state.revision))}</button>`;
     }
     status.dataset.state = state.dirty ? state.saveState : 'saved';
   }
@@ -422,7 +422,7 @@ function shell(content, active = 'projects') {
               <button id="undo-button" class="history-button" data-action="undo" aria-label="Undo" title="Undo (Ctrl+Z)" disabled>↶</button>
               <button id="redo-button" class="history-button" data-action="redo" aria-label="Redo" title="Redo (Ctrl+Y)" disabled>↷</button>
             </div>
-            <span id="save-status" class="save-status" data-state="${state.dirty ? 'unsaved' : 'saved'}">${state.dirty ? 'Unsaved changes' : `Saved · <button type="button" class="version-tag" data-action="versions" title="View version history">v${state.revision}</button>`}</span>
+            <span id="save-status" class="save-status" data-state="${state.dirty ? 'unsaved' : 'saved'}">${state.dirty ? 'Unsaved changes' : `Saved · <button type="button" class="version-tag" data-action="versions" title="View saved versions">Rev ${state.revision}</button>`}</span>
             <button id="validate-button" class="button button-outline button-sm" data-action="validate" title="Validate graph">Validate</button>
             <button class="button button-outline button-sm" data-action="export-draft" title="Export draft JSON">Export</button>
             <button class="button button-outline button-sm" data-action="import-draft" title="Import draft JSON">Import</button>
@@ -687,6 +687,12 @@ function renderTraceEntry(entry) {
   return escapeHtml(entry.label);
 }
 
+function renderTraceStep(entry, index) {
+  const label = state.graph.nodes.find((node) => node.id === entry.nodeId)?.label ?? entry.label ?? entry.kind;
+  const detail = entry.kind === 'condition' || entry.kind === 'group' ? `<span>${renderTraceEntry(entry)}</span>` : '';
+  return `<li title="Node ID: ${escapeHtml(entry.nodeId)}"><span class="trace-index" aria-label="Step ${index + 1}">${index + 1}</span><div class="trace-step"><strong class="trace-label">${escapeHtml(label)}</strong><span class="sr-only">Node ID: ${escapeHtml(entry.nodeId)}.</span>${detail}</div></li>`;
+}
+
 function renderTestPanel() {
   const fields = state.graph.schema;
   const inputs = fields.map((field) => {
@@ -707,7 +713,7 @@ function renderTestPanel() {
   let result = '';
   if (state.result) {
     result = state.result.ok
-      ? `<div class="evaluation-result is-success"><div class="result-outcome"><span class="result-check">✓</span><span><small>DECISION</small><strong>${escapeHtml(state.result.trace.at(-1)?.label)}</strong></span><code>${escapeHtml(JSON.stringify(state.result.result))}</code></div><ol class="trace-list">${state.result.trace.map((entry) => `<li><span class="trace-index">${escapeHtml(entry.nodeId)}</span><span>${renderTraceEntry(entry)}</span></li>`).join('')}</ol></div>`
+      ? `<div class="evaluation-result is-success"><div class="result-outcome"><span class="result-check">✓</span><span><small>DECISION</small><strong>${escapeHtml(state.result.trace.at(-1)?.label)}</strong></span><code>${escapeHtml(JSON.stringify(state.result.result))}</code></div><ol class="trace-list">${state.result.trace.map(renderTraceStep).join('')}</ol></div>`
       : `<div class="evaluation-result is-error"><strong>Could not evaluate</strong><ul>${state.result.errors.map((error) => `<li>${escapeHtml(error.message)}</li>`).join('')}</ul></div>`;
   }
   return `<div class="test-panel"><div class="panel-heading"><div><h3>Test a decision</h3><p>Try sample input without changing the saved graph.</p></div></div>${fields.length ? `<div class="test-fields">${inputs}</div>` : `<p class="panel-empty">No input fields needed for unconditional rules, or add fields to test conditions.</p>`}<div class="test-actions"><button class="button button-primary button-wide" data-action="evaluate">Run test <span>→</span></button><button class="text-button" data-action="clear-test">Clear</button></div>${result}</div>`;

@@ -105,7 +105,14 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   background: var(--canvas);
 }
 
+.app-shell-unified:has(.editor-page) {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .top-nav {
+  flex-shrink: 0;
   position: sticky;
   top: 0;
   z-index: 40;
@@ -463,8 +470,8 @@ h1 { margin: 0; font-size: clamp(24px, 2.5vw, 32px); line-height: 1.15; letter-s
 
 /* Editor View */
 .editor-page {
-  height: calc(100vh - 54px);
-  min-height: 580px;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -885,8 +892,12 @@ h1 { margin: 0; font-size: clamp(24px, 2.5vw, 32px); line-height: 1.15; letter-s
   list-style: none; margin: 10px 0 0; padding: 10px 0 0;
   border-top: 1px solid #e8efea; display: grid; gap: 6px;
 }
-.trace-list li { display: flex; align-items: baseline; gap: 8px; line-height: 1.45; }
-.trace-index { color: var(--muted); font-family: ui-monospace, monospace; font-size: 10px; }
+.trace-list li { display: flex; align-items: baseline; gap: 8px; min-width: 0; line-height: 1.45; }
+.trace-index { flex: 0 0 20px; color: var(--muted); font-family: ui-monospace, monospace; font-size: 10px; }
+.trace-step { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.trace-label { color: var(--ink); font-size: 11px; }
+.result-outcome { min-width: 0; flex-wrap: wrap; }
+.result-outcome strong { overflow-wrap: anywhere; }
 .trace-list b { color: var(--mint-strong); }
 
 /* Toast */
@@ -1011,7 +1022,7 @@ h1 { margin: 0; font-size: clamp(24px, 2.5vw, 32px); line-height: 1.15; letter-s
   .editor-workspace.mobile-view-canvas .canvas-area {
     display: flex;
     flex: 1;
-    min-height: 65vh;
+    min-height: 0;
   }
   .editor-workspace.mobile-view-build .canvas-area,
   .editor-workspace.mobile-view-build .editor-right {
@@ -1021,7 +1032,8 @@ h1 { margin: 0; font-size: clamp(24px, 2.5vw, 32px); line-height: 1.15; letter-s
     display: flex;
     width: 100%;
     border-right: 0;
-    min-height: 65vh;
+    min-height: 0;
+    flex: 1;
   }
   .editor-workspace.mobile-view-properties .canvas-area,
   .editor-workspace.mobile-view-properties .editor-left {
@@ -1031,7 +1043,8 @@ h1 { margin: 0; font-size: clamp(24px, 2.5vw, 32px); line-height: 1.15; letter-s
     display: flex;
     width: 100%;
     border-left: 0;
-    min-height: 65vh;
+    min-height: 0;
+    flex: 1;
   }
   .canvas-topline {
     flex-wrap: wrap;
