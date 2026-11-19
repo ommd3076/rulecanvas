@@ -2,8 +2,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { createStarterGraph, validateGraph } from './rule-engine.mjs';
+import { createEligibilityExampleGraph } from './example-graph.mjs';
 
 const STORE_SCHEMA_VERSION = 1;
+const GUIDED_EXAMPLE_KEY = 'eligibility-v1';
 
 export class StoreError extends Error {
   constructor(message, status = 400, code = 'store.error', details = undefined) {
@@ -189,6 +191,54 @@ export class JsonStore {
       data.projects.push(project);
       addAuditEvent(data, { projectId: project.id, type: 'project.created', details: { slug: project.slug } });
       return project;
+    });
+  }
+
+  async createGuidedExample() {
+    return this.#transact((data) => {
+      const existingEvent = data.auditEvents.find((event) =>
+        event.type === 'project.created' && event.details?.exampleKey === GUIDED_EXAMPLE_KEY
+      );
+      if (existingEvent) {
+        const project = data.projects.find((item) => item.id === existingEvent.projectId);
+        const ruleset = data.rulesets.find((item) => item.projectId === existingEvent.projectId);
+        if (project && ruleset) return { project, ruleset, created: false };
+        throw new StoreError('The saved guided example is incomplete.', 503, 'example.incomplete');
+      }
+
+      const projectName = 'Eligibility Example';
+      const baseSlug = slugify(projectName);
+      let slug = baseSlug;
+      let suffix = 2;
+      while (data.projects.some((project) => project.slug === slug)) slug = `${baseSlug}-${suffix++}`;
+      const now = new Date().toISOString();
+      const project = {
+        id: randomUUID(),
+        slug,
+        name: projectName,
+        createdAt: now,
+        updatedAt: now,
+      };
+      const graph = createEligibilityExampleGraph();
+      const validation = validateGraph(graph);
+      if (!validation.valid) {
+        throw new StoreError('The built-in guided example is invalid.', 500, 'example.invalid', { errors: validation.errors });
+      }
+      const ruleset = {
+        id: randomUUID(),
+        projectId: project.id,
+        name: 'Score eligibility',
+        revision: 1,
+        status: 'draft',
+        graph,
+        createdAt: now,
+        updatedAt: now,
+      };
+      data.projects.push(project);
+      data.rulesets.push(ruleset);
+      addAuditEvent(data, { projectId: project.id, type: 'project.created', details: { slug, exampleKey: GUIDED_EXAMPLE_KEY } });
+      addAuditEvent(data, { projectId: project.id, rulesetId: ruleset.id, type: 'ruleset.created', details: { name: ruleset.name, exampleKey: GUIDED_EXAMPLE_KEY } });
+      return { project, ruleset, created: true };
     });
   }
 

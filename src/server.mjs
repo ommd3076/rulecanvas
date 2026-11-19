@@ -6,6 +6,7 @@ import { evaluateGraph, validateGraph } from './rule-engine.mjs';
 import { JsonStore, StoreError } from './storage.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
+const distDirectory = resolve(root, 'dist');
 const publicDirectory = resolve(root, 'public');
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -13,6 +14,10 @@ const MIME_TYPES = {
   '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
 };
 const MAX_BODY_BYTES = 1_000_000;
 
@@ -54,8 +59,70 @@ function readBody(request) {
   });
 }
 
-async function serveStatic(pathname, response) {
-  const relative = pathname === '/' ? 'index.html' : decodeURIComponent(pathname.slice(1));
+async function serveAppShell(response) {
+  const distIndex = resolve(distDirectory, 'index.html');
+  try {
+    const contents = await readFile(distIndex);
+    response.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-cache',
+    });
+    response.end(contents);
+    return;
+  } catch {}
+
+  const publicIndex = resolve(publicDirectory, 'index.html');
+  try {
+    const contents = await readFile(publicIndex);
+    response.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-cache',
+    });
+    response.end(contents);
+  } catch (error) {
+    sendJson(response, 500, { error: { code: 'server.error', message: 'App shell not found.' } });
+  }
+}
+
+function isScreenRoute(pathname, rawUrl = '') {
+  if (pathname.startsWith('/api/')) return false;
+  if (extname(pathname)) return false;
+  // Disallow directory traversal in screen routes
+  if (
+    pathname.includes('..') ||
+    /%2e%2e/i.test(pathname) ||
+    rawUrl.includes('..') ||
+    /%2e%2e/i.test(rawUrl)
+  ) {
+    return false;
+  }
+  return pathname === '/' || pathname === '/projects' || pathname.startsWith('/projects/');
+}
+
+async function serveStatic(pathname, response, rawUrl = '') {
+  if (isScreenRoute(pathname, rawUrl)) {
+    await serveAppShell(response);
+    return;
+  }
+  let relative;
+  try {
+    relative = pathname === '/' ? 'index.html' : decodeURIComponent(pathname.slice(1));
+  } catch {
+    sendJson(response, 400, { error: { code: 'static.malformed_uri', message: 'Malformed URI encoding.' } });
+    return;
+  }
+  const distFile = resolve(distDirectory, relative);
+  if (distFile === distDirectory || distFile.startsWith(`${distDirectory}${sep}`)) {
+    try {
+      const contents = await readFile(distFile);
+      response.writeHead(200, {
+        'Content-Type': MIME_TYPES[extname(distFile)] ?? 'application/octet-stream',
+        'Cache-Control': 'no-cache',
+      });
+      response.end(contents);
+      return;
+    } catch {}
+  }
   const file = resolve(publicDirectory, relative);
   if (file !== publicDirectory && !file.startsWith(`${publicDirectory}${sep}`)) {
     sendJson(response, 404, { error: { code: 'static.not_found', message: 'Not found.' } });
@@ -81,8 +148,14 @@ export function createRuleCanvasServer({ store = new JsonStore() } = {}) {
   return createServer(async (request, response) => {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Referrer-Policy', 'no-referrer');
-    response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
-    const url = new URL(request.url, 'http://127.0.0.1');
+    response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
+    let url;
+    try {
+      url = new URL(request.url, 'http://127.0.0.1');
+    } catch {
+      await serveAppShell(response);
+      return;
+    }
     const method = request.method;
     try {
       if (url.pathname === '/api/health' && method === 'GET') {
@@ -91,6 +164,11 @@ export function createRuleCanvasServer({ store = new JsonStore() } = {}) {
       }
       if (url.pathname === '/api/projects' && method === 'GET') {
         sendJson(response, 200, { projects: await store.listProjects() });
+        return;
+      }
+      if (url.pathname === '/api/examples/eligibility' && method === 'POST') {
+        const result = await store.createGuidedExample();
+        sendJson(response, result.created ? 201 : 200, result);
         return;
       }
       if (url.pathname === '/api/projects' && method === 'POST') {
@@ -148,13 +226,15 @@ export function createRuleCanvasServer({ store = new JsonStore() } = {}) {
       }
       match = url.pathname.match(/^\/api\/rulesets\/([0-9a-f-]+)\/(validate|evaluate)$/i);
       if (match && method === 'POST') {
+        const body = await readBody(request);
         const ruleset = await store.getRuleset(match[1]);
         if (match[2] === 'validate') {
-          const body = await readBody(request);
           sendJson(response, 200, validateGraph(body.graph ?? ruleset.graph));
           return;
         }
-        const body = await readBody(request);
+        if (body.expectedRevision !== undefined && body.expectedRevision !== ruleset.revision) {
+          throw new StoreError('The saved draft changed. Reload the rule set before running the test again.', 409, 'evaluation.revision_conflict');
+        }
         sendJson(response, 200, evaluateGraph(ruleset.graph, body.input));
         return;
       }
@@ -166,14 +246,15 @@ export function createRuleCanvasServer({ store = new JsonStore() } = {}) {
         sendJson(response, 405, { error: { code: 'method.not_allowed', message: 'Method not allowed.' } });
         return;
       }
-      await serveStatic(url.pathname, response);
+      await serveStatic(url.pathname, response, request.url);
     } catch (error) {
       if (response.headersSent || response.destroyed) return;
-      const status = error instanceof StoreError ? error.status : 500;
+      const isMalformed = error instanceof URIError || error.code === 'ERR_INVALID_URL';
+      const status = error instanceof StoreError ? error.status : (isMalformed ? 400 : 500);
       sendJson(response, status, {
         error: {
-          code: error instanceof StoreError ? error.code : 'server.error',
-          message: error instanceof StoreError ? error.message : 'The request could not be completed.',
+          code: error instanceof StoreError ? error.code : (isMalformed ? 'request.malformed_uri' : 'server.error'),
+          message: error instanceof StoreError ? error.message : (isMalformed ? 'Malformed URI encoding.' : 'The request could not be completed.'),
           ...(error instanceof StoreError && error.details ? { details: error.details } : {}),
         },
       });

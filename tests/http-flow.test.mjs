@@ -69,6 +69,42 @@ test('creates and reloads a project and ruleset through the local HTTP API', asy
   assert.deepEqual(reloaded.body.project.rulesets[0].graph, validGraph());
 });
 
+test('guided example creation is atomic and idempotent across concurrent requests and retries', async (t) => {
+  const base = await startServer(t);
+  const requests = await Promise.all(Array.from({ length: 6 }, () =>
+    jsonRequest(base, '/api/examples/eligibility', { method: 'POST' })
+  ));
+
+  assert.ok(requests.every(({ status }) => status === 200 || status === 201));
+  assert.equal(requests.filter(({ status }) => status === 201).length, 1);
+  assert.equal(new Set(requests.map(({ body }) => body.project.id)).size, 1);
+  assert.equal(new Set(requests.map(({ body }) => body.ruleset.id)).size, 1);
+  assert.equal(requests.filter(({ body }) => body.created).length, 1);
+
+  const retry = await jsonRequest(base, '/api/examples/eligibility', { method: 'POST' });
+  assert.equal(retry.status, 200);
+  assert.equal(retry.body.created, false);
+  assert.equal(retry.body.project.id, requests[0].body.project.id);
+
+  const projects = await jsonRequest(base, '/api/projects');
+  assert.equal(projects.body.projects.length, 1);
+  assert.equal(projects.body.projects[0].rulesetCount, 1);
+  const ruleset = requests[0].body.ruleset;
+  assert.equal(ruleset.revision, 1);
+  assert.equal((await jsonRequest(base, `/api/rulesets/${ruleset.id}/validate`, {
+    method: 'POST', body: JSON.stringify({}),
+  })).body.valid, true);
+  const evaluation = await jsonRequest(base, `/api/rulesets/${ruleset.id}/evaluate`, {
+    method: 'POST', body: JSON.stringify({ input: { score: 8 } }),
+  });
+  assert.equal(evaluation.body.ok, true);
+  assert.equal(evaluation.body.result.decision, 'eligible');
+  assert.deepEqual(evaluation.body.trace.map((step) => step.kind), ['start', 'condition', 'outcome']);
+
+  const audit = await jsonRequest(base, `/api/projects/${requests[0].body.project.id}/audit`);
+  assert.deepEqual(audit.body.events.map((event) => event.type).sort(), ['project.created', 'ruleset.created']);
+});
+
 test('persists nested AND OR groups and replays their typed evaluation trace', async (t) => {
   const base = await startServer(t);
   const project = (await jsonRequest(base, '/api/projects', { method: 'POST', body: JSON.stringify({ name: 'Grouped rules' }) })).body.project;
@@ -128,6 +164,17 @@ test('rejects stale draft writes instead of silently overwriting a newer revisio
   assert.equal(conflict.body.error.code, 'ruleset.conflict');
   const persisted = await jsonRequest(base, `/api/rulesets/${ruleset.id}`);
   assert.deepEqual(persisted.body.ruleset.graph, winner.body.ruleset.graph, 'losing request must not overwrite winning graph');
+
+  const evaluate = (expectedRevision) => jsonRequest(base, `/api/rulesets/${ruleset.id}/evaluate`, {
+    method: 'POST',
+    body: JSON.stringify({ input: { score: 10 }, expectedRevision }),
+  });
+  const staleEvaluation = await evaluate(1);
+  assert.equal(staleEvaluation.status, 409);
+  assert.equal(staleEvaluation.body.error.code, 'evaluation.revision_conflict');
+  const currentEvaluation = await evaluate(2);
+  assert.equal(currentEvaluation.status, 200);
+  assert.equal(currentEvaluation.body.ok, true);
 });
 
 test('creates validated immutable versions with replay and local audit evidence', async (t) => {
