@@ -215,7 +215,7 @@ export function createReleasePolicyState(options = {}) {
     deployments: [],
     auditTrail: [],
     environments: [...new Set(environments.map((value) => value.trim().toLowerCase()))],
-    enforceSeparationOfDuties: options.enforceSeparationOfDuties !== false,
+    enforceSeparationOfDuties: true,
   });
 }
 
@@ -257,7 +257,7 @@ export function approveRelease(state, params = {}) {
   if (release.status !== RELEASE_STATUS.PENDING_REVIEW) fail(RELEASE_ERROR_CODES.INVALID_STATE, 409);
   const normalizedActor = normalizeActor(actor);
   requireRole(normalizedActor, RELEASE_ROLES.REVIEWER);
-  if (state.enforceSeparationOfDuties) assertSeparationOfDuties(release, normalizedActor, RELEASE_ROLES.REVIEWER);
+  assertSeparationOfDuties(release, normalizedActor, RELEASE_ROLES.REVIEWER);
   const reason = validateRationale(rationale);
   const at = validateTimestamp(timestamp);
   const draft = copyState(state);
@@ -279,7 +279,7 @@ export function rejectRelease(state, params = {}) {
   if (release.status !== RELEASE_STATUS.PENDING_REVIEW) fail(RELEASE_ERROR_CODES.INVALID_STATE, 409);
   const normalizedActor = normalizeActor(actor);
   requireRole(normalizedActor, RELEASE_ROLES.REVIEWER);
-  if (state.enforceSeparationOfDuties) assertSeparationOfDuties(release, normalizedActor, RELEASE_ROLES.REVIEWER);
+  assertSeparationOfDuties(release, normalizedActor, RELEASE_ROLES.REVIEWER);
   const reason = validateRationale(rationale);
   const at = validateTimestamp(timestamp);
   const draft = copyState(state);
@@ -300,7 +300,7 @@ function deploy(state, params, action) {
   if (release.status !== RELEASE_STATUS.APPROVED) fail(RELEASE_ERROR_CODES.VERSION_NOT_APPROVED, 422);
   const actor = normalizeActor(params.actor);
   requireRole(actor, RELEASE_ROLES.DEPLOYER);
-  if (state.enforceSeparationOfDuties) assertSeparationOfDuties(release, actor, RELEASE_ROLES.DEPLOYER);
+  assertSeparationOfDuties(release, actor, RELEASE_ROLES.DEPLOYER);
   const rationale = validateRationale(params.rationale);
   const timestamp = validateTimestamp(params.timestamp);
   const environment = environmentName(state, params.environment);

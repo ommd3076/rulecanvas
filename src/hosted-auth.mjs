@@ -20,6 +20,7 @@ function fail(code, status) {
 
 function validConfig(options) {
   if (!options || typeof options !== 'object' || Array.isArray(options)) fail('auth.configuration', 500);
+  if (options.requireTenant !== undefined && typeof options.requireTenant !== 'boolean') fail('auth.configuration', 500);
   if (typeof options.issuer !== 'string' || !options.issuer.trim() ||
       typeof options.audience !== 'string' || !options.audience.trim()) {
     fail('auth.configuration', 500);
@@ -92,7 +93,7 @@ export function verifyAssertion(token, options = {}) {
   const audienceMatches = claims.aud === options.audience ||
     (Array.isArray(claims.aud) && claims.aud.includes(options.audience) && claims.aud.every((item) => typeof item === 'string'));
   if (!audienceMatches) fail('auth.audience');
-  if (typeof claims.sub !== 'string' || !claims.sub.trim() || claims.sub.length > 256 || /[\x00-\x1f\x7f]/.test(claims.sub)) {
+  if (typeof claims.sub !== 'string' || !claims.sub.trim() || claims.sub !== claims.sub.trim() || claims.sub.length > 256 || /[\x00-\x1f\x7f]/.test(claims.sub)) {
     fail('auth.subject');
   }
   if (typeof claims.iat !== 'number' || !Number.isFinite(claims.iat) ||
@@ -106,12 +107,22 @@ export function verifyAssertion(token, options = {}) {
     }
   }
 
-  return Object.freeze({
-    subject: claims.sub.trim(),
+  let tenantId;
+  if (options.requireTenant) {
+    if (typeof claims.tenant !== 'string' || !/^[A-Za-z0-9_.-]{1,128}$/.test(claims.tenant)) {
+      fail('auth.tenant');
+    }
+    tenantId = claims.tenant;
+  }
+
+  const principal = {
+    subject: claims.sub,
     issuer: claims.iss,
     issuedAt: claims.iat,
     expiresAt: claims.exp,
-  });
+  };
+  if (tenantId !== undefined) principal.tenantId = tenantId;
+  return Object.freeze(principal);
 }
 
 /** Read the single configured credential header and verify it. */

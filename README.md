@@ -54,6 +54,15 @@ The server factory also has an integration seam for a trusted authentication pro
 
 When the hosted integration supplies `resolveReleaseRoles`, `GET /api/rulesets/:id/releases` reads release history and `POST` to the same URL accepts `propose`, `approve`, `reject`, `activate`, or `rollback`. The server supplies the actor from the signed identity and resolves the version from the authorized store. Activation and rollback require the expected active version ID (`null` when empty). `POST /api/rulesets/:id/releases/:environment/evaluate` evaluates the environment's active immutable graph and reports its version. The release routes require hosted configuration and server-assigned roles.
 
+### Hosted startup
+
+1. Apply `db/001-workspaces.sql` and `db/002-memberships.sql` to the intended PostgreSQL database with a migration account. Give the runtime account workspace read/write permissions and membership read permission.
+2. Configure `RULECANVAS_DATABASE_URL`, `RULECANVAS_ASSERTION_ISSUER`, `RULECANVAS_ASSERTION_AUDIENCE`, and `RULECANVAS_ASSERTION_SECRET`. Supply the assertion secret as a base64url-encoded key of at least 32 random bytes through your secret manager.
+3. Populate enabled memberships with the exact tenant, issuer, and subject used by the authentication proxy. Roles are `author`, `reviewer`, `deployer`, `runner`, and `admin`.
+4. Build the frontend and run `npm run start:hosted`. Put a trusted TLS proxy in front of the loopback listener. The proxy must replace incoming identity headers and mint short-lived `x-rulecanvas-assertion` credentials with `iss`, `aud`, `sub`, `tenant`, `iat`, and `exp`. Maintain database backups and test restoration before serving customer data.
+
+To opt into the database integration test, point `RULECANVAS_TEST_DATABASE_URL` at a disposable PostgreSQL test database. The test never uses the hosted application's database environment variable.
+
 The visual language incorporates the verified RuleCanvas design system:
 - **Workspace navigation:** Project and rule breadcrumbs, draft save state, version history, and a compact actions menu on narrow screens. The [sitemap](SITEMAP.md) lists the deep links for each workspace view.
 - **Three-Zone Workspace:**

@@ -68,6 +68,11 @@ function parseStoreContents(contents) {
   };
 }
 
+function parseWorkspace(contents) {
+  if (contents !== null) return parseStoreContents(contents);
+  return { schemaVersion: STORE_SCHEMA_VERSION, projects: [], rulesets: [], versions: [], auditEvents: [], evaluationRuns: [], releasePolicies: [] };
+}
+
 function slugify(value) {
   return value
     .normalize('NFKD')
@@ -80,20 +85,26 @@ function slugify(value) {
 
 export class JsonStore {
   #file;
+  #backend;
   #tail = Promise.resolve();
   #recovered = false;
   #corruptOriginal = null;
 
-  constructor(file = resolve('data/rulecanvas.json')) {
+  constructor(file = resolve('data/rulecanvas.json'), backend = null) {
+    if (backend !== null && (typeof backend.read !== 'function' || typeof backend.transact !== 'function')) {
+      throw new TypeError('Workspace storage requires a read and transact backend.');
+    }
     this.#file = file;
+    this.#backend = backend;
   }
 
   async #read() {
+    if (this.#backend) return parseWorkspace(await this.#backend.read());
     let contents;
     try {
       contents = await readFile(this.#file, 'utf8');
     } catch (error) {
-      if (error.code === 'ENOENT') return { schemaVersion: STORE_SCHEMA_VERSION, projects: [], rulesets: [], versions: [], auditEvents: [], evaluationRuns: [], releasePolicies: [] };
+      if (error.code === 'ENOENT') return parseWorkspace(null);
       throw error;
     }
     try {
@@ -148,6 +159,13 @@ export class JsonStore {
   wasRecovered() { return this.#recovered; }
 
   async #transact(operation) {
+    if (this.#backend) {
+      return this.#backend.transact(async (contents) => {
+        const data = parseWorkspace(contents);
+        const value = await operation(data);
+        return { contents: JSON.stringify(data), value };
+      });
+    }
     const previous = this.#tail;
     let release;
     this.#tail = new Promise((resolveTail) => { release = resolveTail; });

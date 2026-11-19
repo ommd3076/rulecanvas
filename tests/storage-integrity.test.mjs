@@ -6,6 +6,30 @@ import { join } from 'node:path';
 import { JsonStore } from '../src/storage.mjs';
 import { validGraph } from './fixtures.mjs';
 
+test('uses the transactional workspace backend and preserves immutable graph hashes after reopening', async () => {
+  let contents = null;
+  const backend = {
+    read: async () => contents,
+    transact: async (change) => {
+      const result = await change(contents);
+      contents = result.contents;
+      return result.value;
+    },
+  };
+  const initial = new JsonStore(null, backend);
+  assert.deepEqual(await initial.listProjects(), []);
+  const project = await initial.createProject('Hosted fixture');
+  const rule = await initial.createRuleset(project.id, 'Immutable decision');
+  await initial.saveRuleset(rule.id, rule.revision, validGraph(), rule.name);
+  const version = await initial.createVersion(rule.id, rule.revision + 1);
+
+  const reopened = new JsonStore(null, backend);
+  assert.equal((await reopened.getVersion(rule.id, version.id)).graphHash, version.graphHash);
+  const checkpoint = contents;
+  await assert.rejects(reopened.saveRuleset(rule.id, rule.revision, validGraph(), rule.name), { code: 'ruleset.conflict' });
+  assert.equal(contents, checkpoint);
+});
+
 test('version reads reject graph data changed without updating its content hash', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'rulecanvas-integrity-'));
   const file = join(directory, 'store.json');

@@ -186,7 +186,7 @@ export function createRuleCanvasServer({ store: localStore, hosted } = {}) {
       }
       if (url.pathname === '/api/health' && method === 'GET') {
         sendJson(response, 200, {
-          ok: true, storage: 'local-json', recovered: store.wasRecovered?.() ?? false,
+          ok: true, storage: hosted?.storageType ?? 'local-json', recovered: store.wasRecovered?.() ?? false,
           ...(typeof hosted?.resolveReleaseRoles === 'function' ? { releaseManagement: true } : {}),
         });
         return;
@@ -328,8 +328,8 @@ export function createRuleCanvasServer({ store: localStore, hosted } = {}) {
       if (response.headersSent || response.destroyed) return;
       if (error instanceof HostedAuthError) {
         const status = error.status;
-        const code = status === 401 ? 'auth.required' : status === 403 ? 'auth.denied' : 'server.error';
-        const message = status === 401 ? 'Authentication required.' : status === 403 ? 'Access denied.' : 'The request could not be completed.';
+        const code = status === 401 ? 'auth.required' : status === 403 ? 'auth.denied' : status === 503 ? 'auth.unavailable' : 'server.error';
+        const message = status === 401 ? 'Authentication required.' : status === 403 ? 'Access denied.' : status === 503 ? 'Authorization is temporarily unavailable.' : 'The request could not be completed.';
         sendJson(response, status, { error: { code, message } });
         return;
       }
