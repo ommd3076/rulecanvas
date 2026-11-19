@@ -11,6 +11,7 @@ import {
 } from '../src/postgres-workspace.mjs';
 import { JsonStore } from '../src/storage.mjs';
 import { createHostedMembership } from '../src/hosted-membership.mjs';
+import { preparePostgresTestSchema } from './postgres-test-schema.mjs';
 
 /**
  * Creates an in-memory mock node-postgres Pool for comprehensive unit testing
@@ -504,12 +505,10 @@ test('real PostgreSQL integration against an explicitly configured test database
   const testTenant = `real-test-${Date.now()}-${process.pid}`;
   const memberTenant = `${testTenant}-member`;
   let schemaReady = false;
-  let membershipsReady = false;
 
   try {
     // 1. Verify connection and apply DDL
-    const ddl = await readFile(resolve('db/001-workspaces.sql'), 'utf8');
-    await pool.query(ddl);
+    await preparePostgresTestSchema(pool);
     schemaReady = true;
 
     const backend = createPostgresWorkspaceBackend({ pool, tenantId: testTenant });
@@ -538,8 +537,6 @@ test('real PostgreSQL integration against an explicitly configured test database
     })));
     assert.equal(JSON.parse(await backend.read()).count, 12);
 
-    await pool.query(await readFile(resolve('db/002-memberships.sql'), 'utf8'));
-    membershipsReady = true;
     const principal = { tenantId: memberTenant, issuer: 'rulecanvas-test', subject: 'fixture-member' };
     const insert = 'INSERT INTO public.hosted_tenant_memberships (tenant_id, issuer, subject, roles) VALUES ($1,$2,$3,$4)';
     await pool.query(insert, [memberTenant, principal.issuer, principal.subject, ['author']]);
@@ -558,7 +555,7 @@ test('real PostgreSQL integration against an explicitly configured test database
     await assert.rejects(resolveAuthorizedStore(request), { status: 403 });
   } finally {
     try {
-      if (membershipsReady) await pool.query('DELETE FROM public.hosted_tenant_memberships WHERE tenant_id = $1', [memberTenant]);
+      if (schemaReady) await pool.query('DELETE FROM public.hosted_tenant_memberships WHERE tenant_id = $1', [memberTenant]);
       if (schemaReady) await pool.query('DELETE FROM rulecanvas_workspaces WHERE tenant_id = ANY($1::text[])', [[testTenant, memberTenant]]);
     } finally {
       await pool.end();
