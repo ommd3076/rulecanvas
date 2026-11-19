@@ -9,6 +9,7 @@ const MEMBERSHIP_QUERY = `
 const ALLOWED_ROLES = new Set(['author', 'reviewer', 'deployer', 'admin', 'runner']);
 const WRITER_ROLES = new Set(['author', 'admin']);
 const EVALUATOR_ROLES = new Set(['runner', 'author', 'admin']);
+const RELEASE_ROLES = new Set(['author', 'reviewer', 'deployer', 'admin']);
 const ID = '[0-9a-f-]+';
 
 function deny() {
@@ -85,6 +86,7 @@ export function createHostedMembership({ pool, storeForTenant } = {}) {
     if (policy === 'admin' && !membership.roles.includes('admin')) deny();
     if (policy === 'write' && !membership.roles.some((role) => WRITER_ROLES.has(role))) deny();
     if (policy === 'evaluate' && !membership.roles.some((role) => EVALUATOR_ROLES.has(role))) deny();
+    if (policy === 'release' && !membership.roles.some((role) => RELEASE_ROLES.has(role))) deny();
 
     let store;
     try { store = await storeForTenant(membership.tenantId); }
