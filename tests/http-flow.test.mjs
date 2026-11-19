@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,9 +8,9 @@ import { createRuleCanvasServer } from '../src/server.mjs';
 import { JsonStore } from '../src/storage.mjs';
 import { validGraph } from './fixtures.mjs';
 
-async function startServer(t) {
+async function startServer(t, optionsFor = (directory) => ({ store: new JsonStore(join(directory, 'store.json')) })) {
   const directory = await mkdtemp(join(tmpdir(), 'rulecanvas-test-'));
-  const server = createRuleCanvasServer({ store: new JsonStore(join(directory, 'store.json')) });
+  const server = createRuleCanvasServer(optionsFor(directory));
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(0, '127.0.0.1', resolve);
@@ -21,6 +22,36 @@ async function startServer(t) {
   });
   return `http://127.0.0.1:${address.port}`;
 }
+
+test('hosted API requires a signed identity and confines requests to the authorized store', async (t) => {
+  const key = Buffer.alloc(32, 7);
+  const base = await startServer(t, (directory) => {
+    const stores = new Map(['alice', 'bob'].map((subject) => [subject, new JsonStore(join(directory, `${subject}.json`))]));
+    return { hosted: {
+      assertion: { secret: key, issuer: 'test-proxy', audience: 'rulecanvas', now: 100 },
+      resolveAuthorizedStore: ({ principal, method }) => method === 'POST' && principal.subject === 'bob' ? null : stores.get(principal.subject),
+    } };
+  });
+  const authorize = (subject) => {
+    const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+    const payload = `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode({ iss: 'test-proxy', aud: 'rulecanvas', sub: subject, iat: 90, exp: 120 })}`;
+    return { 'x-rulecanvas-assertion': `${payload}.${createHmac('sha256', key).update(payload).digest('base64url')}` };
+  };
+
+  const anonymous = await jsonRequest(base, '/api/projects', { headers: { 'x-forwarded-user': 'alice' } });
+  assert.equal(anonymous.status, 401);
+  assert.equal((await jsonRequest(base, '/api/health')).status, 401);
+  assert.equal((await jsonRequest(base, '/api/projects', { headers: authorize('stranger') })).status, 403);
+
+  const newProject = { method: 'POST', body: JSON.stringify({ name: 'Alice private project' }) };
+  const created = await jsonRequest(base, '/api/projects', { ...newProject, headers: authorize('alice') });
+  assert.equal(created.status, 201);
+  const projectPath = `/api/projects/${created.body.project.id}`;
+  assert.equal((await jsonRequest(base, projectPath, { headers: authorize('alice') })).status, 200);
+  assert.equal((await jsonRequest(base, projectPath, { headers: { ...authorize('bob'), 'x-forwarded-user': 'alice' } })).status, 404);
+  assert.equal((await jsonRequest(base, `${projectPath}/runs`, { headers: authorize('bob') })).status, 404);
+  assert.equal((await jsonRequest(base, '/api/projects', { ...newProject, headers: authorize('bob') })).status, 403);
+});
 
 async function jsonRequest(base, path, options = {}) {
   const response = await fetch(`${base}${path}`, {

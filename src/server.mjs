@@ -4,6 +4,7 @@ import { extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { evaluateGraph, validateGraph } from './rule-engine.mjs';
 import { JsonStore, StoreError } from './storage.mjs';
+import { HostedAuthError, verifyRequestAssertion } from './hosted-auth.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const distDirectory = resolve(root, 'dist');
@@ -157,7 +158,11 @@ async function serveStatic(pathname, response, rawUrl = '') {
   }
 }
 
-export function createRuleCanvasServer({ store = new JsonStore() } = {}) {
+export function createRuleCanvasServer({ store: localStore, hosted } = {}) {
+  if (hosted !== undefined && (localStore || typeof hosted?.resolveAuthorizedStore !== 'function' || !hosted.assertion)) {
+    throw new TypeError('Hosted mode requires assertion configuration and an authorized store resolver.');
+  }
+  if (hosted === undefined) localStore ??= new JsonStore();
   return createServer(async (request, response) => {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Referrer-Policy', 'no-referrer');
@@ -171,6 +176,12 @@ export function createRuleCanvasServer({ store = new JsonStore() } = {}) {
     }
     const method = request.method;
     try {
+      let store = localStore;
+      if (hosted && (url.pathname === '/api' || url.pathname.startsWith('/api/'))) {
+        const principal = verifyRequestAssertion(request, hosted.assertion);
+        store = await hosted.resolveAuthorizedStore({ principal, method, pathname: url.pathname });
+        if (!store) throw new HostedAuthError('auth.denied', 403);
+      }
       if (url.pathname === '/api/health' && method === 'GET') {
         sendJson(response, 200, { ok: true, storage: 'local-json', recovered: store.wasRecovered?.() ?? false });
         return;
@@ -281,6 +292,13 @@ export function createRuleCanvasServer({ store = new JsonStore() } = {}) {
       await serveStatic(url.pathname, response, request.url);
     } catch (error) {
       if (response.headersSent || response.destroyed) return;
+      if (error instanceof HostedAuthError) {
+        const status = error.status;
+        const code = status === 401 ? 'auth.required' : status === 403 ? 'auth.denied' : 'server.error';
+        const message = status === 401 ? 'Authentication required.' : status === 403 ? 'Access denied.' : 'The request could not be completed.';
+        sendJson(response, status, { error: { code, message } });
+        return;
+      }
       const isMalformed = error instanceof URIError || error.code === 'ERR_INVALID_URL';
       const status = error instanceof StoreError ? error.status : (isMalformed ? 400 : 500);
       sendJson(response, status, {
