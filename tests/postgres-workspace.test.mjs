@@ -10,6 +10,7 @@ import {
   DEFAULT_WORKSPACE_TABLE,
 } from '../src/postgres-workspace.mjs';
 import { JsonStore } from '../src/storage.mjs';
+import { createHostedMembership } from '../src/hosted-membership.mjs';
 
 /**
  * Creates an in-memory mock node-postgres Pool for comprehensive unit testing
@@ -501,7 +502,9 @@ test('real PostgreSQL integration against an explicitly configured test database
   const Pool = pg.default?.Pool ?? pg.Pool;
   const pool = new Pool({ connectionString: dbUrl, connectionTimeoutMillis: 5000 });
   const testTenant = `real-test-${Date.now()}-${process.pid}`;
+  const memberTenant = `${testTenant}-member`;
   let schemaReady = false;
+  let membershipsReady = false;
 
   try {
     // 1. Verify connection and apply DDL
@@ -534,9 +537,29 @@ test('real PostgreSQL integration against an explicitly configured test database
       return { contents: JSON.stringify(state), value: state.count };
     })));
     assert.equal(JSON.parse(await backend.read()).count, 12);
+
+    await pool.query(await readFile(resolve('db/002-memberships.sql'), 'utf8'));
+    membershipsReady = true;
+    const principal = { tenantId: memberTenant, issuer: 'rulecanvas-test', subject: 'fixture-member' };
+    const insert = 'INSERT INTO public.hosted_tenant_memberships (tenant_id, issuer, subject, roles) VALUES ($1,$2,$3,$4)';
+    await pool.query(insert, [memberTenant, principal.issuer, principal.subject, ['author']]);
+    const { resolveAuthorizedStore } = createHostedMembership({
+      pool,
+      storeForTenant: (tenantId) => new JsonStore(null, createPostgresWorkspaceBackend({ pool, tenantId })),
+    });
+    const request = { principal, method: 'POST', pathname: '/api/projects' };
+    const store = await resolveAuthorizedStore(request);
+    const project = await store.createProject('Database membership fixture');
+    const otherStore = await resolveAuthorizedStore({ ...request, method: 'GET' });
+    assert.equal((await otherStore.getProject(project.id)).id, project.id);
+    await assert.rejects(resolveAuthorizedStore({ ...request, principal: { ...principal, tenantId: testTenant } }), { status: 403 });
+    assert.equal(JSON.parse(await backend.read()).count, 12);
+    await pool.query('UPDATE public.hosted_tenant_memberships SET enabled = false WHERE tenant_id = $1 AND issuer = $2 AND subject = $3', [memberTenant, principal.issuer, principal.subject]);
+    await assert.rejects(resolveAuthorizedStore(request), { status: 403 });
   } finally {
     try {
-      if (schemaReady) await pool.query('DELETE FROM rulecanvas_workspaces WHERE tenant_id = $1', [testTenant]);
+      if (membershipsReady) await pool.query('DELETE FROM public.hosted_tenant_memberships WHERE tenant_id = $1', [memberTenant]);
+      if (schemaReady) await pool.query('DELETE FROM rulecanvas_workspaces WHERE tenant_id = ANY($1::text[])', [[testTenant, memberTenant]]);
     } finally {
       await pool.end();
     }
