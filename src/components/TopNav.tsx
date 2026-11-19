@@ -16,7 +16,8 @@ import {
 } from '@remixicon/react';
 
 interface TopNavProps {
-  view: 'dashboard' | 'project' | 'runs' | 'editor';
+  view: 'dashboard' | 'project' | 'runs' | 'editor' | 'releases';
+  releaseManagementAvailable?: boolean;
   projectName?: string;
   rulesetName?: string;
   activeRevision?: number;
@@ -26,6 +27,7 @@ interface TopNavProps {
   canRedo?: boolean;
   onNavigateDashboard: () => void;
   onNavigateProject: () => void;
+  onOpenReleases?: () => void;
   onOpenActivity: () => void;
   onUndo?: () => void;
   onRedo?: () => void;
@@ -39,6 +41,7 @@ interface TopNavProps {
 
 export const TopNav: React.FC<TopNavProps> = ({
   view,
+  releaseManagementAvailable = false,
   projectName,
   rulesetName,
   activeRevision = 1,
@@ -48,6 +51,7 @@ export const TopNav: React.FC<TopNavProps> = ({
   canRedo = false,
   onNavigateDashboard,
   onNavigateProject,
+  onOpenReleases,
   onOpenActivity,
   onUndo,
   onRedo,
@@ -70,6 +74,8 @@ export const TopNav: React.FC<TopNavProps> = ({
   if (view === 'editor' && rulesetName) breadcrumbItems.push({ label: rulesetName });
   if (view === 'project') breadcrumbItems.push({ label: 'Rule sets' });
   if (view === 'runs') breadcrumbItems.push({ label: 'Evaluation runs' });
+  if (view === 'releases' && rulesetName) breadcrumbItems.push({ label: rulesetName });
+  if (view === 'releases') breadcrumbItems.push({ label: 'Releases' });
 
   return (
     <header className="relative z-40 flex h-14 min-h-14 w-full items-center justify-between gap-3 border-b border-separator-border bg-background-primary-default px-3 sm:px-5">
@@ -104,6 +110,9 @@ export const TopNav: React.FC<TopNavProps> = ({
             <IconButton size="small" icon={RiFileList3Line} aria-label="Audit log" onClick={onOpenActivity} />
             <Tooltip>Audit log</Tooltip>
           </TooltipTrigger>
+          {releaseManagementAvailable && (
+            <Button variant="secondary" size="small" onClick={onOpenReleases} className="hidden lg:inline-flex">Releases</Button>
+          )}
           <Button variant="secondary" size="small" leadingIcon={RiCheckLine} onClick={onValidate} className="hidden md:inline-flex">
             Validate
           </Button>
@@ -118,6 +127,7 @@ export const TopNav: React.FC<TopNavProps> = ({
               <DropdownPopover aria-label="Editor actions" placement="bottom end" className="w-48">
                 <Button variant="secondary" size="small" leadingIcon={RiCheckLine} onClick={() => runAction(onValidate)} className="md:hidden">Validate</Button>
                 <Button variant="secondary" size="small" leadingIcon={RiHistoryLine} onClick={() => runAction(onSaveVersion)}>Save version</Button>
+                {releaseManagementAvailable && <Button variant="secondary" size="small" onClick={() => runAction(onOpenReleases)}>Releases</Button>}
                 <Button variant="secondary" size="small" leadingIcon={RiArrowGoBackLine} onClick={() => runAction(onUndo)} disabled={!canUndo} className="sm:hidden">Undo</Button>
                 <Button variant="secondary" size="small" leadingIcon={RiArrowGoForwardLine} onClick={() => runAction(onRedo)} disabled={!canRedo} className="sm:hidden">Redo</Button>
                 {saveState === 'conflict' && onDownloadConflict && (

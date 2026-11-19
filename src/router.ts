@@ -15,6 +15,7 @@ export type RouteState =
   | { type: 'runs'; projectId: string }
   | { type: 'editor'; projectId: string; ruleId: string; panel?: PanelType }
   | { type: 'versions'; projectId: string; ruleId: string; versionId?: string }
+  | { type: 'releases'; projectId: string; ruleId: string }
   | { type: 'not_found'; path: string };
 
 export function parseRoute(pathname: string, search: string = ''): RouteState {

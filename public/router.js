@@ -6,6 +6,7 @@
  * - /projects/:projectId/runs
  * - /projects/:projectId/rules/:ruleId
  * - /projects/:projectId/rules/:ruleId?panel=schema|test
+ * - /projects/:projectId/rules/:ruleId/releases
  * - /projects/:projectId/rules/:ruleId/versions
  * - /projects/:projectId/rules/:ruleId/versions/:versionId
  */
@@ -98,6 +99,15 @@ export function parseRoute(pathname, search = '') {
       };
     }
 
+    // /projects/:projectId/rules/:ruleId/releases
+    const releasesMatch = cleanPath.match(/^\/projects\/([^/]+)\/rules\/([^/]+)\/releases$/);
+    if (releasesMatch) {
+      const projectId = safeDecodeId(releasesMatch[1]);
+      const ruleId = safeDecodeId(releasesMatch[2]);
+      if (!projectId || !ruleId) return { type: 'not_found', path: pathname };
+      return { type: 'releases', projectId, ruleId };
+    }
+
     // /projects/:projectId/rules/:ruleId/versions
     const versionsMatch = cleanPath.match(/^\/projects\/([^/]+)\/rules\/([^/]+)\/versions$/);
     if (versionsMatch) {
@@ -171,6 +181,8 @@ export function buildRouteUrl(route) {
       }
       return base;
     }
+    case 'releases':
+      return `/projects/${encodeURIComponent(route.projectId)}/rules/${encodeURIComponent(route.ruleId)}/releases`;
     case 'not_found':
     default:
       return '/projects';

@@ -32,6 +32,7 @@ import { DashboardView } from './components/DashboardView';
 import { eligibilityExampleInput } from './example';
 import { ProjectOverviewView } from './components/ProjectOverviewView';
 import { RunsView } from './components/RunsView';
+import { ReleasesView } from './components/ReleasesView';
 import { GraphCanvas } from './components/GraphCanvas';
 import { NodeInspector } from './components/NodeInspector';
 import { SchemaEditor } from './components/SchemaEditor';
@@ -79,15 +80,28 @@ export function App() {
   const [guidedExampleRulesetId, setGuidedExampleRulesetId] = useState<string | null>(null);
   const [isStartingGuidedExample, setIsStartingGuidedExample] = useState(false);
   const isStartingGuidedExampleRef = useRef(false);
+  const [releaseManagementAvailable, setReleaseManagementAvailable] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    api.getHealth().then((health) => {
+      if (active) setReleaseManagementAvailable(health.releaseManagement === true);
+    }).catch(() => {
+      if (active) setReleaseManagementAvailable(false);
+    });
+    return () => { active = false; };
+  }, []);
 
   // Derived View identifier for SaveCoordinator and TopNav
-  const view: 'dashboard' | 'project' | 'runs' | 'editor' =
+  const view: 'dashboard' | 'project' | 'runs' | 'editor' | 'releases' =
     route.type === 'project' || (route.type === 'versions' && returnRouteRef.current?.type === 'project')
       ? 'project'
       : route.type === 'runs'
       ? 'runs'
       : route.type === 'versions' && returnRouteRef.current?.type === 'runs'
       ? 'runs'
+      : route.type === 'releases'
+      ? 'releases'
       : route.type === 'editor' || route.type === 'versions'
       ? 'editor'
       : 'dashboard';
@@ -296,7 +310,7 @@ export function App() {
       return;
     }
 
-    if (targetRoute.type === 'editor' || targetRoute.type === 'versions') {
+    if (targetRoute.type === 'editor' || targetRoute.type === 'versions' || targetRoute.type === 'releases') {
       try {
         // Step 1: Verify Project Existence
         let project: ProjectDetail;
@@ -780,6 +794,7 @@ export function App() {
         {/* Top App Bar */}
         <TopNav
           view={view}
+          releaseManagementAvailable={releaseManagementAvailable === true}
           projectName={currentProject?.name}
           rulesetName={currentRuleset?.name}
           activeRevision={activeRevision}
@@ -791,6 +806,9 @@ export function App() {
           onNavigateProject={() =>
             currentProject && navigateTo({ type: 'project', projectId: currentProject.id })
           }
+          onOpenReleases={() => currentProject && currentRuleset && navigateTo({
+            type: 'releases', projectId: currentProject.id, ruleId: currentRuleset.id,
+          })}
           onOpenActivity={handleOpenAudit}
           onUndo={handleUndo}
           onRedo={handleRedo}
@@ -896,6 +914,17 @@ export function App() {
               )}
 
               {/* Editor Workspace View */}
+              {route.type === 'releases' && currentProject && currentRuleset && (
+                <div className="h-full w-full overflow-y-auto">
+                  <ReleasesView
+                    project={currentProject}
+                    ruleset={currentRuleset}
+                    isAvailable={releaseManagementAvailable}
+                    onBackToEditor={() => navigateTo({ type: 'editor', projectId: currentProject.id, ruleId: currentRuleset.id })}
+                  />
+                </div>
+              )}
+
               {(route.type === 'editor' ||
                 (route.type === 'versions' && returnRouteRef.current?.type !== 'project' && returnRouteRef.current?.type !== 'runs')) &&
                 currentRuleset && (

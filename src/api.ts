@@ -132,6 +132,66 @@ export interface EvaluationResult {
   errors?: Array<{ code: string; message: string }>;
 }
 
+export interface ReleaseRecord {
+  key: string;
+  versionId: string;
+  rulesetId: string;
+  projectId: string;
+  versionNumber: number;
+  sourceRevision: number;
+  graphHash: string;
+  name: string;
+  status: 'pending_review' | 'approved' | 'rejected';
+  proposedAt: string;
+  proposedBy: { id: string; name: string; roles: string[] };
+  proposalRationale: string;
+  approvedAt: string | null;
+  approvedBy: { id: string; name: string; roles: string[] } | null;
+  approvalRationale: string | null;
+  rejectedAt: string | null;
+  rejectedBy: { id: string; name: string; roles: string[] } | null;
+  rejectionRationale: string | null;
+}
+
+export interface ReleaseDeployment {
+  rulesetId: string;
+  environment: string;
+  versionId: string;
+  versionHash: string;
+  updatedAt: string;
+  history: Array<{ versionId: string; versionHash: string; action: string; at: string }>;
+}
+
+export interface ReleaseAuditEntry {
+  id: string;
+  action: string;
+  timestamp: string;
+  actorId: string;
+  actorRoles: string[];
+  rationale: string;
+  rulesetId: string | null;
+  versionId: string | null;
+  versionHash: string | null;
+  environment: string | null;
+  previousVersionId: string | null;
+  nextVersionId: string | null;
+}
+
+export interface ReleasePolicyState {
+  releases: ReleaseRecord[];
+  deployments: ReleaseDeployment[];
+  auditTrail: ReleaseAuditEntry[];
+  environments: string[];
+  enforceSeparationOfDuties: boolean;
+}
+
+export type ReleaseAction = 'propose' | 'approve' | 'reject' | 'activate' | 'rollback';
+
+export interface ReleaseStateResponse {
+  policy: ReleasePolicyState;
+  roles: string[];
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(path, {
     ...options,
@@ -154,7 +214,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  getHealth: () => request<{ ok: boolean; storage: string; recovered: boolean }>('/api/health'),
+  getHealth: () => request<{ ok: boolean; storage: string; recovered: boolean; releaseManagement?: boolean }>('/api/health'),
 
   getProjects: () => request<{ projects: ProjectSummary[] }>('/api/projects'),
   createGuidedExample: () => request<{ project: ProjectDetail; ruleset: RulesetDetail; created: boolean }>('/api/examples/eligibility', {
@@ -198,4 +258,16 @@ export const api = {
 
   getAudit: (projectId: string) => request<{ events: AuditEvent[] }>(`/api/projects/${encodeURIComponent(projectId)}/audit`),
   getProjectRuns: (projectId: string) => request<{ runs: EvaluationRun[] }>(`/api/projects/${encodeURIComponent(projectId)}/runs`),
+  getReleaseState: (rulesetId: string) => request<ReleaseStateResponse>(`/api/rulesets/${encodeURIComponent(rulesetId)}/releases`),
+  transitionRelease: (rulesetId: string, params: {
+    action: ReleaseAction;
+    versionId: string;
+    versionHash: string;
+    environment?: string;
+    expectedActiveVersionId?: string | null;
+    rationale: string;
+  }) => request<ReleaseStateResponse>(`/api/rulesets/${encodeURIComponent(rulesetId)}/releases`, {
+    method: 'POST',
+    body: JSON.stringify(params),
+  }),
 };

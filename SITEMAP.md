@@ -12,6 +12,7 @@ RuleCanvas is a local decision workbench for analysts who need to turn rules int
 | `/projects/:projectId/rules/:ruleId?panel=test` | Enter typed inputs, run the saved draft, inspect the trace |
 | `/projects/:projectId/rules/:ruleId/versions` | Browse immutable versions |
 | `/projects/:projectId/rules/:ruleId/versions/:versionId` | Inspect and replay the selected snapshot |
+| `/projects/:projectId/rules/:ruleId/releases` | Review approvals and manage active versions when hosted release management is enabled |
 
 Keep temporary UI state such as zoom, selection, and unsubmitted example inputs out of URLs. Load the project and rule by ID, verify their relationship, and ignore network replies superseded by a newer navigation. Missing records get a specific recovery screen with a link to the closest valid parent. Network failures get retry controls. Serve the app shell for valid screen routes while preserving API and asset 404s.
 
