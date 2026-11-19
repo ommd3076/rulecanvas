@@ -25,9 +25,16 @@ function readConfig(env) {
 }
 
 let pool;
+let startupStage = 'configuration';
 try {
   const { databaseUrl, host, port, assertion } = readConfig(process.env);
-  pool = new pg.Pool({ connectionString: databaseUrl, connectionTimeoutMillis: 5000 });
+  startupStage = 'database and schema';
+  pool = new pg.Pool({
+    connectionString: databaseUrl,
+    connectionTimeoutMillis: 5000,
+    statement_timeout: 10_000,
+    idle_in_transaction_session_timeout: 15_000,
+  });
   pool.on('error', () => process.stderr.write('RuleCanvas database connection lost.\n'));
   const { rows: [schema] } = await pool.query("SELECT to_regclass('rulecanvas_workspaces') AS workspaces, to_regclass('public.hosted_tenant_memberships') AS memberships");
   if (!schema?.workspaces || !schema?.memberships) throw new Error('Hosted schema migrations are required.');
@@ -37,17 +44,37 @@ try {
   });
   const checkReadiness = async () => { await pool.query({ text: 'SELECT 1', query_timeout: 2000 }); };
   const server = createRuleCanvasServer({ hosted: { assertion, storageType: 'postgres', checkReadiness, ...membership } });
+  startupStage = 'listener';
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, resolve);
   });
   process.stdout.write(`RuleCanvas hosted API listening on ${host}, port ${port}\n`);
-  const stop = () => server.close(() => { void pool.end(); });
+  let stopping = false;
+  const stop = () => {
+    if (stopping) return;
+    stopping = true;
+    const deadline = setTimeout(() => {
+      server.closeAllConnections();
+      process.stderr.write('RuleCanvas hosted shutdown exceeded its grace period.\n');
+      process.exit(1);
+    }, 8000).unref();
+    server.close(async () => {
+      try {
+        await pool.end();
+      } catch {
+        process.stderr.write('RuleCanvas could not close its database pool cleanly.\n');
+        process.exitCode = 1;
+      } finally {
+        clearTimeout(deadline);
+      }
+    });
+  };
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
 } catch {
   // Connection errors may contain deployment details. Print configuration guidance only.
-  process.stderr.write('RuleCanvas hosted startup failed. Check the database, assertion settings, and port.\n');
+  process.stderr.write(`RuleCanvas hosted startup failed during ${startupStage}.\n`);
   if (pool) await pool.end();
   process.exitCode = 1;
 }

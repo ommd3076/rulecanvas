@@ -40,6 +40,7 @@ async function startHosted(secret, databaseUrl, t) {
       child.kill('SIGKILL');
       await closed;
     }
+    if (process.platform !== 'win32') assert.equal(child.exitCode, 0, diagnostic || 'Expected a clean hosted shutdown.');
   };
   t.after(stop);
 
