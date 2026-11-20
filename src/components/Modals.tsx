@@ -4,6 +4,7 @@ import {
   ModalHeader,
   ModalBody,
   ModalFooter,
+  AlertDialog,
 } from '@/components/base/modal/modal';
 import { Button } from '@/components/base/buttons/button';
 import { Input } from '@/components/base/input/input';
@@ -166,6 +167,7 @@ interface VersionHistoryModalProps {
   onClose: () => void;
   onInspectVersion: (versionId: string) => Promise<VersionDetail>;
   onEvaluateVersion: (versionId: string, input: Record<string, any>) => Promise<EvaluationResult>;
+  onRestoreVersion: (version: VersionDetail) => Promise<void>;
   onSelectVersionId?: (versionId: string) => void;
 }
 
@@ -178,12 +180,15 @@ export const VersionHistoryModal: React.FC<VersionHistoryModalProps> = ({
   onClose,
   onInspectVersion,
   onEvaluateVersion,
+  onRestoreVersion,
   onSelectVersionId,
 }) => {
   const [selectedVersion, setSelectedVersion] = useState<VersionDetail | null>(null);
   const [evalInput, setEvalInput] = useState('{}');
   const [evalResult, setEvalResult] = useState<EvaluationResult | null>(null);
   const [evalError, setEvalError] = useState<string | null>(null);
+  const [confirmRestore, setConfirmRestore] = useState(false);
+  const [restoreError, setRestoreError] = useState('');
   const inspectionRequest = useRef(0);
   const evaluationRequest = useRef(0);
 
@@ -351,6 +356,12 @@ export const VersionHistoryModal: React.FC<VersionHistoryModalProps> = ({
                 </Chip>
               </div>
 
+              <div>
+                <Button variant="secondary" size="small" onClick={() => { setRestoreError(''); setConfirmRestore(true); }}>
+                  Restore to draft
+                </Button>
+              </div>
+
               {/* RareUI CodeBlock */}
               <div className="max-h-60 overflow-y-auto rounded-xl">
                 <CodeBlock
@@ -404,6 +415,24 @@ export const VersionHistoryModal: React.FC<VersionHistoryModalProps> = ({
           Close
         </Button>
       </ModalFooter>
+      <AlertDialog
+        isOpen={confirmRestore}
+        onOpenChange={setConfirmRestore}
+        title="Restore this version to the draft?"
+        description="The current draft will be replaced with this snapshot. You can undo the change in the editor."
+        confirmLabel="Restore draft"
+        pendingLabel="Restoring…"
+        onConfirm={async () => {
+          if (!selectedVersion) return;
+          try { await onRestoreVersion(selectedVersion); }
+          catch (error) {
+            setRestoreError(error instanceof Error ? error.message : 'The version could not be restored.');
+            throw error;
+          }
+        }}
+      >
+        {restoreError && <p role="alert" className="text-body-2-regular text-text-error-primary">{restoreError}</p>}
+      </AlertDialog>
     </Modal>
   );
 };

@@ -760,15 +760,58 @@ async function runSmoke() {
       await client.waitForFunction(`() => document.querySelectorAll('#graph-canvas g.cursor-move').length === ${initialNodeCount}`);
       console.log('✓ Selected nodes moved together and were restored by undo after confirmed deletion');
 
+      // Capture the actual audit after synthetic editor changes have saved.
+      await client.waitForFunction(`() => document.querySelector('header [aria-live="polite"]')?.textContent.startsWith('Saved · Rev')`);
+      assert(await client.eval(`(() => {
+        const button = document.querySelector('button[aria-label="Audit log"]');
+        if (!button) return false;
+        button.click();
+        return true;
+      })()`), 'Audit log action was unavailable');
+      await client.waitForFunction(`() => {
+        const dialog = document.querySelector('[role="dialog"]');
+        return Boolean(dialog && dialog.textContent.includes('Audit Log') && dialog.textContent.includes('ruleset.draft.saved'));
+      }`);
+      await sleep(500);
+      const auditScreenshot = await client.send('Page.captureScreenshot', { format: 'png' });
+      await fs.writeFile(path.join(SCREENSHOTS_DIR, '06_audit_log.png'), Buffer.from(auditScreenshot.data, 'base64'));
+      await client.eval(`(() => {
+        const dialog = document.querySelector('[role="dialog"]');
+        Array.from(dialog.querySelectorAll('button')).find(button => button.textContent.trim() === 'Close')?.click();
+      })()`);
+      await client.waitForFunction(`() => !document.querySelector('[role="dialog"]')`);
+      console.log('✓ Audit log displayed saved synthetic edits and screenshot captured');
+
       // Release Checks 4 & 5: SITEMAP Deep Link, Version Replay & Recovery Views
       console.log('--- Step 5.5: Deep Link Routes, Version Replay & Recovery Views ---');
 
       // Test Direct Immutable Version Replay (/projects/:pId/rules/:rId/versions/:vId)
       const versionUrl = `http://127.0.0.1:${freshPort}/projects/f63f6117-695b-40ba-8d71-9e7df47ce566/rules/07c973f2-f12b-4040-8b73-db027627f338/versions/e661790b-f615-46ec-a402-cbe8dc7bd86e`;
+      const restoreRulePath = '/api/rulesets/07c973f2-f12b-4040-8b73-db027627f338';
+      const modifiedX = await client.eval(`(async () => {
+        const existing = await (await fetch('${restoreRulePath}')).json();
+        const graph = structuredClone(existing.ruleset.graph);
+        graph.nodes[0].x += 123;
+        const saved = await fetch('${restoreRulePath}', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedRevision: existing.ruleset.revision, name: existing.ruleset.name, graph }) });
+        if (!saved.ok) throw new Error('Could not prepare restore fixture');
+        return graph.nodes[0].x;
+      })()`);
       console.log('Navigating directly to version snapshot deep-link:', versionUrl);
       await client.navigateTo(versionUrl, { expectedHeading: 'Version History' });
       await client.waitForFunction(`() => document.body.textContent.includes('Immutable Version') && document.body.textContent.includes('Verified SHA-256')`);
       console.log('✓ Release Check 5 passed: Direct immutable version deep-link opened and inspected snapshot');
+
+      assert(await client.eval(`(() => { const button = Array.from(document.querySelectorAll('button')).find(item => item.textContent.trim() === 'Restore to draft'); button?.click(); return !!button; })()`), 'Restore action missing');
+      await client.waitForFunction(`() => !!document.querySelector('[role="alertdialog"]')`);
+      assert(await client.eval(`(() => { const dialog = document.querySelector('[role="alertdialog"]'); const button = Array.from(dialog.querySelectorAll('button')).find(item => item.textContent.trim() === 'Restore draft'); button?.click(); return !!button; })()`), 'Restore confirmation missing');
+      await client.waitForFunction(`() => !document.querySelector('[role="dialog"]') && !!document.querySelector('#graph-canvas')`);
+      await client.waitForFunction(`async () => (await (await fetch('${restoreRulePath}')).json()).ruleset.graph.nodes[0].x !== ${modifiedX}`, 16000);
+      assert(await client.eval(`(() => { const button = document.querySelector('button[aria-label="Undo"]'); if (!button || button.disabled) return false; button.click(); return true; })()`), 'Restore was not undoable');
+      await client.waitForFunction(`async () => (await (await fetch('${restoreRulePath}')).json()).ruleset.graph.nodes[0].x === ${modifiedX}`, 16000);
+      console.log('✓ Version restore saved the snapshot and Undo restored the previous draft');
+
+      await client.navigateTo(versionUrl, { expectedHeading: 'Version History' });
+      await client.waitForFunction(`() => document.body.textContent.includes('Immutable Version')`);
 
       // Test direct version deep-link modal close destination fallback to Editor
       console.log('Testing direct version deep-link modal close destination fallback...');
@@ -1232,7 +1275,7 @@ async function runSmoke() {
       await client.eval(`Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === 'Save scenario').click()`);
       const savedList = 'ul[aria-label="Saved test scenarios"]';
       await client.waitForFunction(`() => document.querySelector('${savedList}')?.textContent.includes('${scenarioLabel}')`);
-      await client.send('Page.reload', { ignoreCache: true });
+      await client.navigateTo(scenarioUrl, { expectedSelector: scenarioField });
       await client.waitForFunction(`() => document.querySelector('${savedList}')?.textContent.includes('${scenarioLabel}')`);
       await client.eval(`Array.from(document.querySelector('${savedList}').querySelectorAll('button')).find(button => button.textContent.trim() === 'Load').click()`);
       await client.waitForFunction(`() => document.querySelector('input[aria-label="score"]')?.value === '8'`);

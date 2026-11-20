@@ -1242,6 +1242,28 @@ export function App() {
             if (!targetId) throw new Error('No ruleset specified for version evaluation');
             return api.evaluateVersion(targetId, vId, input);
           }}
+          onRestoreVersion={async (version) => {
+            const projectId = currentProjectRef.current?.id;
+            const rule = currentRulesetRef.current;
+            if (!projectId || !rule || rule.id !== versionModalRuleset?.id || !versionHistoryList.some((item) => item.id === version.id)) {
+              throw new Error('The selected snapshot is no longer open in this workspace.');
+            }
+            await flushPendingDraft();
+            const verified = await api.getVersion(rule.id, version.id);
+            if (verified.version.graphHash !== version.graphHash || currentRulesetRef.current?.id !== rule.id) {
+              throw new Error('The rule set changed while preparing the draft.');
+            }
+            const destination: RouteState = { type: 'editor', projectId, ruleId: rule.id };
+            const navigation = await navigateTo(destination);
+            if (!navigation?.allowed || currentRulesetRef.current?.id !== rule.id) {
+              throw new Error('The editor could not be opened. The draft was preserved.');
+            }
+            handleUpdateGraph(structuredClone(verified.version.graph), 'restore-version');
+            setSelectedNodeId(null);
+            setActiveTraceNodeId(null);
+            setValidationResult(null);
+            toast.success(`Version ${version.versionNumber} restored to draft. Undo is available.`);
+          }}
         />
 
         <AuditModal
