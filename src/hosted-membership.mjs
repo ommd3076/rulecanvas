@@ -36,6 +36,8 @@ function routePolicy(method, pathname) {
   if (match) return method === 'GET' ? 'admin' : null;
   match = pathname.match(new RegExp(`^/api/projects/${ID}/legacy-source$`, 'i'));
   if (match) return method === 'GET' ? 'admin' : null;
+  match = pathname.match(new RegExp(`^/api/projects/${ID}/export$`, 'i'));
+  if (match) return method === 'GET' ? 'admin' : null;
 
   match = pathname.match(new RegExp(`^/api/rulesets/${ID}/duplicate$`, 'i'));
   if (match) return method === 'POST' ? 'write' : null;
