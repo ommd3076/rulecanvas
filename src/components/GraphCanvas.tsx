@@ -174,18 +174,22 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   );
 
   // Remove connection with undo history preservation
-  const handleDeleteSelectedEdge = useCallback(() => {
-    if (!selectedEdgeId) return;
+  const handleDeleteEdge = useCallback((edgeId: string | null) => {
+    if (!edgeId) return;
     const cloned = {
       ...graph,
       edges: [...graph.edges],
     };
-    if (removeConnection(cloned, selectedEdgeId)) {
+    if (removeConnection(cloned, edgeId)) {
       onUpdateGraph(cloned, 'delete-connection');
       setSelectedEdgeId(null);
       setAnnouncement('Connection removed');
     }
-  }, [graph, selectedEdgeId, onUpdateGraph]);
+  }, [graph, onUpdateGraph]);
+
+  const handleDeleteSelectedEdge = useCallback(() => {
+    handleDeleteEdge(selectedEdgeId);
+  }, [handleDeleteEdge, selectedEdgeId]);
 
   const requestDeleteSelectedNode = useCallback(() => {
     if (!selectedNodeId) return;
@@ -911,12 +915,14 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
+                    e.stopPropagation();
                     setSelectedEdgeId(edge.id);
                     onSelectNode(null);
                     setAnnouncement(`Selected connection from ${fromTitle} to ${toTitle}`);
                   } else if (e.key === 'Delete' || e.key === 'Backspace') {
                     e.preventDefault();
-                    handleDeleteSelectedEdge();
+                    e.stopPropagation();
+                    handleDeleteEdge(edge.id);
                   }
                 }}
               >
