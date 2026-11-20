@@ -29,6 +29,7 @@ import { serializeConflictCopy } from '@/public/conflict-copy';
 import { useSaveCoordinator } from './useSaveCoordinator';
 import { TopNav } from './components/TopNav';
 import { DashboardView } from './components/DashboardView';
+import { LegacyImportModal } from './components/LegacyImportModal';
 import { PublicHomePage } from './components/PublicHomePage';
 import { TeamSettingsView } from './components/TeamSettingsView';
 import { eligibilityExampleInput } from './example';
@@ -191,6 +192,7 @@ export function App() {
 
   // Modals
   const [isCreateProjectOpen, setIsCreateProjectOpen] = useState(false);
+  const [isLegacyImportOpen, setIsLegacyImportOpen] = useState(false);
   const [isCreateRulesetOpen, setIsCreateRulesetOpen] = useState(false);
   const [isVersionHistoryOpen, setIsVersionHistoryOpen] = useState(false);
   const [versionModalRuleset, setVersionModalRuleset] = useState<{ id: string; name: string } | null>(null);
@@ -891,6 +893,7 @@ export function App() {
                     projects={projects}
                     onSelectProject={(pId) => navigateTo({ type: 'project', projectId: pId })}
                     onNewProject={() => setIsCreateProjectOpen(true)}
+                    onImportLegacy={() => setIsLegacyImportOpen(true)}
                     onTryExample={handleStartGuidedExample}
                     isTryingExample={isStartingGuidedExample}
                   />
@@ -1173,6 +1176,11 @@ export function App() {
         />
 
         {/* Modals */}
+        <LegacyImportModal
+          isOpen={isLegacyImportOpen}
+          onClose={() => setIsLegacyImportOpen(false)}
+          onImported={(projectId) => { void navigateTo({ type: 'project', projectId }); toast.success('Legacy project imported.'); }}
+        />
         <CreateProjectModal
           isOpen={isCreateProjectOpen}
           onClose={() => setIsCreateProjectOpen(false)}

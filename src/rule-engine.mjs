@@ -208,7 +208,7 @@ export function validateGraph(graph) {
     if (node.type === 'condition' || node.type === 'group') {
       const prefix = node.type === 'group' ? 'graph.group' : 'graph.condition';
       const label = node.type === 'group' ? 'Logic group' : 'Condition';
-      if (ins.length !== 1) errors.push(fail(`${prefix}.input`, `Each ${label.toLowerCase()} needs exactly one incoming connection.`, { nodeId: node.id }));
+      if (ins.length < 1) errors.push(fail(`${prefix}.input`, `Each ${label.toLowerCase()} needs at least one incoming connection.`, { nodeId: node.id }));
       for (const port of ['true', 'false']) {
         if (outs.filter((edge) => edge.fromPort === port).length !== 1) {
           errors.push(fail(`${prefix}.branch`, `Each ${label.toLowerCase()} needs exactly one ${port} branch.`, { nodeId: node.id }));
@@ -218,8 +218,8 @@ export function validateGraph(graph) {
         errors.push(fail(`${prefix}.port`, `${label} outputs must use true or false ports.`, { nodeId: node.id }));
       }
     }
-    if (node.type === 'outcome' && (ins.length !== 1 || outs.length !== 0)) {
-      errors.push(fail('graph.outcome.connections', 'Outcome needs one incoming connection and no outgoing connections.', { nodeId: node.id }));
+    if (node.type === 'outcome' && (ins.length < 1 || outs.length !== 0)) {
+      errors.push(fail('graph.outcome.connections', 'Outcome needs at least one incoming connection and no outgoing connections.', { nodeId: node.id }));
     }
   }
 

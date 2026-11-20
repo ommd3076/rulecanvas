@@ -9,6 +9,7 @@ interface DashboardViewProps {
   projects: ProjectSummary[];
   onSelectProject: (projectId: string) => void;
   onNewProject: () => void;
+  onImportLegacy: () => void;
   onTryExample?: () => void;
   isTryingExample?: boolean;
 }
@@ -34,6 +35,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   projects,
   onSelectProject,
   onNewProject,
+  onImportLegacy,
   onTryExample,
   isTryingExample = false,
 }) => {
@@ -59,6 +61,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </p>
         </div>
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
+          <Button variant="secondary" size="medium" onClick={onImportLegacy}>Import project</Button>
           {onTryExample && (
             <Button
               variant="secondary"

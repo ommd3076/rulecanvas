@@ -20,6 +20,7 @@ function routePolicy(method, pathname) {
   if (typeof pathname !== 'string') return null;
   if (method === 'GET' && pathname === '/api/health') return 'member';
   if (pathname === '/api/projects') return method === 'GET' ? 'member' : method === 'POST' ? 'write' : null;
+  if (pathname === '/api/projects/import-legacy') return method === 'POST' ? 'write' : null;
   if (method === 'POST' && pathname === '/api/examples/eligibility') return 'write';
   if (pathname === '/api/team/members') {
     return (method === 'GET' || method === 'POST' || method === 'PATCH') ? 'admin' : null;
@@ -32,6 +33,8 @@ function routePolicy(method, pathname) {
   match = pathname.match(new RegExp(`^/api/projects/${ID}/runs$`, 'i'));
   if (match) return method === 'GET' ? 'member' : null;
   match = pathname.match(new RegExp(`^/api/projects/${ID}/audit$`, 'i'));
+  if (match) return method === 'GET' ? 'admin' : null;
+  match = pathname.match(new RegExp(`^/api/projects/${ID}/legacy-source$`, 'i'));
   if (match) return method === 'GET' ? 'admin' : null;
 
   match = pathname.match(new RegExp(`^/api/rulesets/${ID}$`, 'i'));

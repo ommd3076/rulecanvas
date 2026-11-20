@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { createStarterGraph, validateGraph } from './rule-engine.mjs';
 import { createEligibilityExampleGraph } from './example-graph.mjs';
+import { translateLegacyProject } from './legacy-project-import.mjs';
 import { activateRelease, approveRelease, createReleasePolicyState, getDeployment, getRelease, proposeRelease, rejectRelease, rollbackRelease } from './release-policy.mjs';
 
 const STORE_SCHEMA_VERSION = 1;
@@ -206,7 +207,7 @@ export class JsonStore {
 
   async listProjects() {
     const data = await this.#read();
-    return data.projects.map((project) => ({
+    return data.projects.map(({ legacySource, ...project }) => ({
       ...project,
       rulesetCount: data.rulesets.filter((ruleset) => ruleset.projectId === project.id).length,
     }));
@@ -220,7 +221,15 @@ export class JsonStore {
       const versions = data.versions.filter((version) => version.rulesetId === ruleset.id).sort((a, b) => b.versionNumber - a.versionNumber);
       return { ...ruleset, versionCount: versions.length, latestVersionNumber: versions[0]?.versionNumber ?? null };
     });
-    return { ...project, rulesets };
+    const { legacySource, ...summary } = project;
+    return { ...summary, hasLegacySource: Boolean(legacySource), rulesets };
+  }
+
+  async getLegacyProjectSource(projectId) {
+    const data = await this.#read();
+    const project = data.projects.find((item) => item.id === projectId);
+    if (!project?.legacySource) throw new StoreError('Original legacy export not found.', 404, 'legacy.not_found');
+    return project.legacySource;
   }
 
   async createProject(name) {
@@ -244,6 +253,40 @@ export class JsonStore {
       data.projects.push(project);
       addAuditEvent(data, this.#actor, { projectId: project.id, type: 'project.created', details: { slug: project.slug } });
       return project;
+    });
+  }
+
+  async importLegacyProject(envelope) {
+    let translated;
+    try { translated = translateLegacyProject(envelope); }
+    catch (error) { throw new StoreError(error.message, 422, 'legacy.invalid'); }
+    return this.#transact((data) => {
+      const baseSlug = slugify(translated.name);
+      if (!baseSlug) throw new StoreError('Project name needs at least one letter or number.', 422, 'project.slug');
+      let slug = baseSlug;
+      let suffix = 2;
+      while (data.projects.some((item) => item.slug === slug)) slug = `${baseSlug}-${suffix++}`;
+      const now = new Date().toISOString();
+      const project = { id: randomUUID(), slug, name: translated.name, createdAt: now, updatedAt: now, legacySource: translated.source };
+      const ruleset = { id: randomUUID(), projectId: project.id, name: translated.name, revision: 1, status: 'draft', graph: translated.graph, createdAt: now, updatedAt: now };
+      const versions = translated.versions.map((version) => ({
+        id: randomUUID(), rulesetId: ruleset.id, projectId: project.id, versionNumber: version.versionNumber,
+        sourceRevision: 1, name: ruleset.name, graph: version.graph,
+        graphHash: createHash('sha256').update(JSON.stringify(version.graph)).digest('hex'), createdAt: version.createdAt,
+        legacyVersionId: version.id, legacyLabel: version.label, legacyCommitNote: version.commitNote,
+      }));
+      versions.sort((a, b) => a.versionNumber - b.versionNumber);
+      if (versions.length) { ruleset.status = 'versioned'; ruleset.latestVersionId = versions.at(-1).id; }
+      const scenarios = translated.scenarios.map((scenario) => ({
+        id: randomUUID(), rulesetId: ruleset.id, name: scenario.name.trim(), description: scenario.description.trim(),
+        inputs: scenario.inputs, expectedOutcomeId: scenario.expectedOutcomeId, createdAt: now, legacyScenarioId: scenario.id,
+      }));
+      data.projects.push(project);
+      data.rulesets.push(ruleset);
+      data.versions.push(...versions);
+      data.testScenarios.push(...scenarios);
+      addAuditEvent(data, this.#actor, { projectId: project.id, rulesetId: ruleset.id, type: 'project.legacy_imported', details: { versions: versions.length, scenarios: scenarios.length } });
+      return { project: { id: project.id, name: project.name }, ruleset: { id: ruleset.id }, warnings: translated.warnings };
     });
   }
 

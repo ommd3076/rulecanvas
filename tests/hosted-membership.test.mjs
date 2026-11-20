@@ -23,6 +23,8 @@ test('resolves a scoped store using an exact, enabled tenant membership and serv
   assert.deepEqual(await resolver.resolveReleaseRoles({ principal, store, rulesetId: 'abc' }), ['reviewer']);
   await assert.rejects(resolve('POST', '/api/projects'), { status: 403 });
   await assert.rejects(resolve('GET', '/api/projects/abc/audit'), { status: 403 });
+  await assert.rejects(resolve('GET', '/api/projects/abc/legacy-source'), { status: 403 });
+  await assert.rejects(resolve('POST', '/api/projects/import-legacy'), { status: 403 });
   await assert.rejects(resolve('POST', '/api/rulesets/abc/evaluate'), { status: 403 });
   await assert.rejects(resolve('GET', '/api/rulesets/abc/scenarios'), { status: 403 });
   await assert.rejects(resolve('POST', '/api/unknown'), { status: 403 });
@@ -33,6 +35,12 @@ test('resolves a scoped store using an exact, enabled tenant membership and serv
   await assert.rejects(resolve('POST', '/api/rulesets/abc/scenarios'), { status: 403 });
   await assert.rejects(resolve('DELETE', '/api/rulesets/abc/scenarios/def'), { status: 403 });
   await assert.rejects(resolve('POST', '/api/rulesets/abc/releases'), { status: 403 });
+  await assert.rejects(resolve('POST', '/api/projects/import-legacy'), { status: 403 });
+  row = { ...row, roles: ['author'] };
+  assert.equal(await resolve('POST', '/api/projects/import-legacy'), store);
+  await assert.rejects(resolve('GET', '/api/projects/abc/legacy-source'), { status: 403 });
+  row = { ...row, roles: ['admin'] };
+  assert.equal(await resolve('GET', '/api/projects/abc/legacy-source'), store);
   row.enabled = false;
   await assert.rejects(resolve('GET', '/api/projects'), { status: 403 });
   row = null;

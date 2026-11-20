@@ -7,6 +7,7 @@ import { JsonStore, StoreError } from './storage.mjs';
 import { HostedAuthError, verifyRequestAssertion } from './hosted-auth.mjs';
 import { ReleasePolicyError } from './release-policy.mjs';
 import { HostedTeamError } from './hosted-team.mjs';
+import { translateLegacyProject } from './legacy-project-import.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const distDirectory = resolve(root, 'dist');
@@ -253,6 +254,18 @@ export function createRuleCanvasServer({ store: localStore, hosted } = {}) {
         sendJson(response, 200, { projects: await store.listProjects() });
         return;
       }
+      if (url.pathname === '/api/projects/import-legacy' && method === 'POST') {
+        const body = await readBody(request);
+        if (body.confirm !== true) {
+          try {
+            const translated = translateLegacyProject(body.envelope);
+            sendJson(response, 200, { name: translated.name, warnings: translated.warnings, versionCount: translated.versions.length, scenarioCount: translated.scenarios.length });
+          } catch (error) { throw new StoreError(error.message, 422, 'legacy.invalid'); }
+          return;
+        }
+        sendJson(response, 201, await store.importLegacyProject(body.envelope));
+        return;
+      }
       if (url.pathname === '/api/examples/eligibility' && method === 'POST') {
         const result = await store.createGuidedExample();
         sendJson(response, result.created ? 201 : 200, result);
@@ -346,6 +359,11 @@ export function createRuleCanvasServer({ store: localStore, hosted } = {}) {
       match = url.pathname.match(/^\/api\/projects\/([0-9a-f-]+)\/audit$/i);
       if (match && method === 'GET') {
         sendJson(response, 200, { events: await store.listAuditEvents(match[1]) });
+        return;
+      }
+      match = url.pathname.match(/^\/api\/projects\/([0-9a-f-]+)\/legacy-source$/i);
+      if (match && method === 'GET') {
+        sendJson(response, 200, { source: await store.getLegacyProjectSource(match[1]) });
         return;
       }
       match = url.pathname.match(/^\/api\/rulesets\/([0-9a-f-]+)\/releases(?:\/([a-z0-9-]+)\/evaluate)?$/i);

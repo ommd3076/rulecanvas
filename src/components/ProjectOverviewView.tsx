@@ -5,6 +5,8 @@ import { IconButton } from '@/components/base/buttons/icon-button';
 import { Table, TableBody, TableCell, TableColumn, TableHeader, TableRow } from '@/components/base/table/table';
 import { RiAddLine, RiArrowRightLine, RiGitBranchLine, RiHistoryLine } from '@remixicon/react';
 import type { ProjectDetail } from '@/src/api';
+import { api } from '@/src/api';
+import { toast } from 'sonner';
 
 interface ProjectOverviewViewProps {
   project: ProjectDetail;
@@ -38,6 +40,17 @@ export const ProjectOverviewView: React.FC<ProjectOverviewViewProps> = ({
           </p>
         </div>
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+          {project.hasLegacySource && <Button variant="secondary" size="medium" onClick={async () => {
+            try {
+              const { source } = await api.getLegacySource(project.id);
+              const url = URL.createObjectURL(new Blob([JSON.stringify(source, null, 2)], { type: 'application/json' }));
+              const link = document.createElement('a');
+              link.href = url;
+              link.download = 'rulecanvas-legacy-export.json';
+              link.click();
+              URL.revokeObjectURL(url);
+            } catch (error) { toast.error(error instanceof Error ? error.message : 'Original export could not be downloaded.'); }
+          }}>Download original export</Button>}
           <Button variant="secondary" size="medium" onClick={onOpenRuns}>Evaluation runs</Button>
           {rulesets.length > 0 && <SearchField
             aria-label="Search rule sets"

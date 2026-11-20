@@ -1,5 +1,13 @@
 # RuleCanvas Web Release & Verification Report
 
+## Current verification checkpoint — 2026-11-20
+
+The verified application baseline is commit `53e5f5ce543cb7cc349a62ad0e4d7b0edf20e87a`. GitHub Actions ran 126 tests against PostgreSQL with no skips, checked TypeScript and the production build, and built and verified the hosted container. The browser acceptance runs used synthetic data and covered the public home, workspace, editor, multi-select movement and undo, saved test scenarios, hosted team roles, release approvals, deployment and rollback. [GitHub Actions run](https://github.com/ommd3076/rulecanvas/actions/runs/44714244690)
+
+Commit `6022ad3` adds restoring an immutable saved version into an editable draft. Its browser acceptance passed for confirmation, persistence and undo. The same browser run captured `reports/screenshots/06_audit_log.png` from synthetic workspace activity. That local screenshot's SHA-256 was `2e9a9798c0804cfc45b7442c1629ac7d8fe4a4f821e55ff21663d467086b6c7e` when captured.
+
+The five reference images match the hashes recorded in `../04_Implementation/EXECUTION/universal_visual_references.json`. The historical sections below describe the earlier local-only checkpoint and its then-current evidence. Hosted operation requires the configured identity proxy, database and migrations described in the README. A customer staging deployment and formal cross-browser and assistive-technology review remain open.
+
 **Date:** 2026-11-19
 **Project:** RuleCanvas by ENNORM
 **Checkout Path:** `C:\tmp\QUEUE\AUTONOMOUS_DEV_WORKSPACE\01_RuleCanvas`

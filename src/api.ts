@@ -63,6 +63,7 @@ export interface ProjectDetail {
   rulesets: RulesetSummary[];
   createdAt: string;
   updatedAt: string;
+  hasLegacySource?: boolean;
 }
 
 export interface VersionSummary {
@@ -250,6 +251,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
+  previewLegacyProject: (envelope: unknown) => request<{ name: string; warnings: string[]; versionCount: number; scenarioCount: number }>('/api/projects/import-legacy', { method: 'POST', body: JSON.stringify({ envelope }) }),
+  importLegacyProject: (envelope: unknown) => request<{ project: { id: string; name: string }; ruleset: { id: string }; warnings: string[] }>('/api/projects/import-legacy', { method: 'POST', body: JSON.stringify({ envelope, confirm: true }) }),
+  getLegacySource: (projectId: string) => request<{ source: unknown }>(`/api/projects/${encodeURIComponent(projectId)}/legacy-source`),
   getHealth: () => request<{ ok: boolean; storage: string; recovered: boolean; releaseManagement?: boolean; teamManagement?: boolean }>('/api/health'),
 
   getProjects: () => request<{ projects: ProjectSummary[] }>('/api/projects'),

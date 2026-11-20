@@ -1283,6 +1283,45 @@ async function runSmoke() {
       await client.waitForFunction(`() => Array.from(document.querySelectorAll('[role="status"]')).some(status => status.textContent.includes('${scenarioLabel}') && status.textContent.includes('PASS') && status.textContent.includes('Actual outcome: Eligible'))`);
       console.log('✓ Scenario saved, reloaded from persistence, and evaluated with PASS against the expected outcome');
 
+      console.log('--- Step 9: Legacy project import ---');
+      const legacySchema = [{ id: 'field-score', key: 'score', label: 'Score', type: 'number', required: true, defaultValue: 8 }];
+      const legacyNodes = [
+        { id: 'start', type: 'start', title: 'Start', position: { x: 0, y: 0 }, nextNodeId: 'condition' },
+        { id: 'condition', type: 'condition', title: 'Threshold', position: { x: 300, y: 0 }, condition: { id: 'c1', kind: 'condition', fieldKey: 'score', operator: 'gte', value: 8 }, trueTargetId: 'pass', falseTargetId: 'review' },
+        { id: 'pass', type: 'outcome', title: 'Pass', position: { x: 600, y: 0 }, outcomeCode: 'PASS', category: 'approve', reason: 'Eligible', metadata: {} },
+        { id: 'review', type: 'outcome', title: 'Review', position: { x: 600, y: 200 }, outcomeCode: 'REVIEW', category: 'review', reason: 'Review', metadata: {} },
+      ];
+      const legacy = { format: 'RuleCanvas.by.ENNORM.ProjectExport.v1', exportedAt: '2026-01-01T00:00:00.000Z', project: {
+        id: 'legacy-project', name: 'Imported synthetic decision', slug: 'imported-synthetic', description: 'Synthetic migration fixture',
+        schema: legacySchema, nodes: legacyNodes, auditLog: [],
+        versions: [{ id: 'legacy-v1', versionNumber: 1, label: 'Initial', commitNote: 'Synthetic', createdAt: '2026-01-01T00:00:00.000Z', snapshot: { schema: legacySchema, nodes: legacyNodes } }],
+        testScenarios: [{ id: 'legacy-scenario', name: 'Legacy boundary', description: 'Synthetic boundary', inputs: { score: 8 }, expectedOutcomeCode: 'PASS' }],
+      } };
+      const legacyFile = path.join(workspace, 'legacy-fixture.json');
+      await fs.writeFile(legacyFile, JSON.stringify(legacy));
+      await client.navigateTo(`http://127.0.0.1:${freshPort}/projects`, { expectedHeading: 'Your decision workspace' });
+      await client.eval(`localStorage.setItem('rulecanvas.ennorm.projects.v1', 'unchanged synthetic source')`);
+      await client.eval(`Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === 'Import project').click()`);
+      await client.waitForSelector('#legacy-project-file');
+      const documentRoot = await client.send('DOM.getDocument', {});
+      const fileInput = await client.send('DOM.querySelector', { nodeId: documentRoot.root.nodeId, selector: '#legacy-project-file' });
+      await client.send('DOM.setFileInputFiles', { nodeId: fileInput.nodeId, files: [legacyFile] });
+      await client.eval(`Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === 'Review export').click()`);
+      await client.waitForFunction(`() => document.querySelector('[aria-label="Import review"]')?.textContent.includes('1 versions')`);
+      await client.eval(`Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === 'Import project' && button.closest('[role="dialog"]')).click()`);
+      await client.waitForFunction(`() => document.querySelector('h1')?.textContent === 'Imported synthetic decision'`);
+      const imported = await client.eval(`fetch('/api/projects').then(response => response.json()).then(result => result.projects.find(project => project.name === 'Imported synthetic decision'))`);
+      const detail = await client.eval(`fetch('/api/projects/${imported.id}').then(response => response.json())`);
+      const importedRule = detail.project.rulesets[0];
+      const importedVersions = await client.eval(`fetch('/api/rulesets/${importedRule.id}/versions').then(response => response.json())`);
+      const importedScenarios = await client.eval(`fetch('/api/rulesets/${importedRule.id}/scenarios').then(response => response.json())`);
+      assert.equal(importedVersions.versions.length, 1);
+      assert.equal(importedScenarios.scenarios[0].expectedOutcomeId, 'pass');
+      assert.equal(await client.eval(`localStorage.getItem('rulecanvas.ennorm.projects.v1')`), 'unchanged synthetic source');
+      const original = await client.eval(`fetch('/api/projects/${imported.id}/legacy-source').then(response => response.json())`);
+      assert.deepEqual(original.source, legacy);
+      console.log('✓ Legacy export reviewed, imported and preserved with its version, scenario, and browser-local source untouched');
+
       // Assert zero runtime errors or unhandled exceptions occurred
       assert.equal(
         runtimeExceptions.length,
