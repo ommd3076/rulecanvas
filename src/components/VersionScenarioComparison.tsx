@@ -27,11 +27,14 @@ export function VersionScenarioComparison({ rulesetId, version }: { rulesetId: s
     setRows([]);
     try {
       const [{ scenarios }, { ruleset }] = await Promise.all([api.listScenarios(rulesetId), api.getRuleset(rulesetId)]);
+      if (request !== sequence.current) return;
       if (!scenarios.length) throw new Error('Save a test scenario in the editor before comparing.');
       const results: Comparison[] = [];
       for (const scenario of scenarios) {
         const draft = await api.evaluateGraph(rulesetId, scenario.inputs, ruleset.revision);
+        if (request !== sequence.current) return;
         const snapshot = await api.evaluateVersion(rulesetId, version.id, scenario.inputs);
+        if (request !== sequence.current) return;
         results.push({ scenario, draft, version: snapshot });
       }
       const latest = await api.getRuleset(rulesetId);
