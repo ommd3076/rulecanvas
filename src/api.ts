@@ -132,6 +132,15 @@ export interface EvaluationResult {
   errors?: Array<{ code: string; message: string }>;
 }
 
+export interface ActiveReleaseEvaluationResult extends EvaluationResult {
+  environment: string;
+  version: {
+    id: string;
+    versionNumber: number;
+    graphHash: string;
+  };
+}
+
 export interface ReleaseRecord {
   key: string;
   versionId: string;
@@ -270,4 +279,8 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(params),
   }),
+  evaluateActiveRelease: (rulesetId: string, environment: string, input: Record<string, any>, expectedVersionId: string) => request<ActiveReleaseEvaluationResult>(
+    `/api/rulesets/${encodeURIComponent(rulesetId)}/releases/${encodeURIComponent(environment)}/evaluate`,
+    { method: 'POST', body: JSON.stringify({ input, expectedVersionId }) },
+  ),
 };

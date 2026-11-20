@@ -120,7 +120,10 @@ test('hosted release actions use stored versions and server-assigned roles', asy
   assert.equal((await post(releases, { ...next, action: 'propose' })).status, 200);
   assert.equal((await post(releases, { ...next, action: 'approve' }, 'reviewer')).status, 200);
   assert.equal((await post(releases, { ...activation, ...next, expectedActiveVersionId: version.id }, 'deployer')).status, 200);
-  const afterActivation = await post(runtime, { input: { score: 8 } });
+  const stale = await post(runtime, { expectedVersionId: version.id, input: { score: 8 } });
+  assert.equal(stale.status, 409);
+  assert.equal(stale.body.error.code, 'release.active_version_conflict');
+  const afterActivation = await post(runtime, { expectedVersionId: nextVersion.id, input: { score: 8 } });
   assert.equal(afterActivation.body.version.id, nextVersion.id);
   assert.equal(afterActivation.body.result.decision, 'review');
   assert.equal((await post(releases, { ...activation, action: 'rollback', expectedActiveVersionId: nextVersion.id }, 'deployer')).status, 200);
@@ -132,6 +135,7 @@ test('hosted release actions use stored versions and server-assigned roles', asy
   assert.match(JSON.stringify(policy.body.policy), new RegExp(version.id));
   const reopened = new JsonStore(releaseStoreFile);
   assert.equal((await reopened.getActiveReleaseVersion(ruleset.id, 'production')).id, version.id);
+  assert.equal((await reopened.listEvaluationRuns(project.id)).length, 3, 'A stale-version request cannot create a run.');
   const events = await reopened.listAuditEvents(project.id, ruleset.id);
   const rollback = events.find((event) => event.type === 'release.rollback');
   assert.equal(rollback.actor, 'deployer');

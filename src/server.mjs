@@ -293,6 +293,9 @@ export function createRuleCanvasServer({ store: localStore, hosted } = {}) {
         if (match[2]) {
           const environment = match[2].toLowerCase();
           const version = await store.getActiveReleaseVersion(rulesetId, environment);
+          if (body.expectedVersionId !== undefined && body.expectedVersionId !== version.id) {
+            throw new StoreError('The active version changed. Reload the environment before evaluating.', 409, 'release.active_version_conflict');
+          }
           const result = evaluateGraph(version.graph, body.input);
           await persistEvaluationRun(store, version.graph, result, {
             projectId: version.projectId, rulesetId, revision: version.sourceRevision,

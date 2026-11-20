@@ -4,6 +4,7 @@ import { Select, SelectItem } from '@/components/base/select/select';
 import { Textarea } from '@/components/base/textarea/textarea';
 import { api, type ProjectDetail, type ReleaseAction, type ReleasePolicyState, type ReleaseRecord, type ReleaseStateResponse, type RulesetDetail, type VersionSummary } from '@/src/api';
 import { RiRefreshLine } from '@remixicon/react';
+import { ReleaseEnvironmentTest } from './ReleaseEnvironmentTest';
 
 interface ReleasesViewProps {
   project: ProjectDetail;
@@ -30,6 +31,7 @@ export const ReleasesView: React.FC<ReleasesViewProps> = ({ project, ruleset, is
   const [errorMessage, setErrorMessage] = useState('');
   const [selectedVersionId, setSelectedVersionId] = useState('');
   const [selectedEnvironment, setSelectedEnvironment] = useState('');
+  const [testEnvironment, setTestEnvironment] = useState('');
   const [rationale, setRationale] = useState('');
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [actionError, setActionError] = useState('');
@@ -59,6 +61,7 @@ export const ReleasesView: React.FC<ReleasesViewProps> = ({ project, ruleset, is
       setRoles(releaseState.roles || []);
       setVersions(versionState.versions || []);
       setSelectedEnvironment((current) => current || releaseState.policy.environments[0] || '');
+      setTestEnvironment((current) => current && releaseState.policy.environments.includes(current) ? current : releaseState.policy.environments[0] || '');
       setSelectedVersionId((current) => current || versionState.versions[0]?.id || '');
       setStatus('ready');
     } catch (error: any) {
@@ -139,6 +142,7 @@ export const ReleasesView: React.FC<ReleasesViewProps> = ({ project, ruleset, is
   const canAuthor = hasRole(roles, 'author');
   const canReview = hasRole(roles, 'reviewer');
   const canDeploy = hasRole(roles, 'deployer');
+  const canRun = hasRole(roles, 'runner') || hasRole(roles, 'author');
   const rationaleReady = rationale.trim().length >= 5;
   const needsRationale = (canAuthor && availableVersions.length > 0) ||
     (canReview && policy?.releases.some((release) => release.status === 'pending_review')) ||
@@ -223,6 +227,29 @@ export const ReleasesView: React.FC<ReleasesViewProps> = ({ project, ruleset, is
                 })}
               </div>
             )}
+          </section>
+
+          <section aria-label="Test an active deployment" className="rounded-2xl border border-border-button-default bg-background-primary-default p-4 sm:p-6">
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h2 className="text-title-3-semibold text-text-primary">Test a deployed decision</h2>
+                <p className="mt-1 text-body-2-regular text-text-secondary">Run a real typed evaluation against an immutable version currently active in an environment.</p>
+              </div>
+              {policy.environments.length > 0 && <Select aria-label="Environment to test" selectedKey={testEnvironment} onSelectionChange={(key) => setTestEnvironment(String(key))} className="w-full sm:w-64">
+                {policy.environments.map((environment) => <SelectItem key={environment} id={environment}>{environment}</SelectItem>)}
+              </Select>}
+            </div>
+            {testEnvironment ? (
+              <ReleaseEnvironmentTest
+                key={`${ruleset.id}:${testEnvironment}:${deploymentByEnvironment.get(testEnvironment)?.versionId || 'inactive'}`}
+                rulesetId={ruleset.id}
+                environment={testEnvironment}
+                deployment={deploymentByEnvironment.get(testEnvironment)}
+                release={policy.releases.find((item) => item.versionId === deploymentByEnvironment.get(testEnvironment)?.versionId)}
+                canRun={canRun}
+                onRefresh={() => void load()}
+              />
+            ) : <p className="text-body-2-regular text-text-secondary">No environment is configured for deployment tests.</p>}
           </section>
 
           <section aria-label="Release records" className="flex flex-col gap-3">

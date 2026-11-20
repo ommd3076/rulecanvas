@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { createHmac, randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import net from 'node:net';
-import os from 'node:os';
 import path from 'node:path';
 import { createRuleCanvasServer } from '../src/server.mjs';
 import { JsonStore } from '../src/storage.mjs';
@@ -194,7 +193,8 @@ async function switchIdentity(client, subject, secret) {
 }
 
 async function run() {
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'rulecanvas-hosted-release-smoke-'));
+  await fs.mkdir(path.resolve('reports'), { recursive: true });
+  const workspace = await fs.mkdtemp(path.resolve('reports', 'temp-release-browser-'));
   const localFile = path.join(workspace, 'local.json');
   const hostedFile = path.join(workspace, 'hosted.json');
   const fixtureText = `${JSON.stringify(createHostedReleaseSmokeFixture(), null, 2)}\n`;
@@ -317,6 +317,30 @@ async function run() {
     console.log('✓ Deployer identity and staging activation verified');
 
     await switchIdentity(client, 'smoke-author', secret);
+    const activeForm = 'section[aria-label="Test active staging release"]';
+    await client.waitFor(`!!document.querySelector('${activeForm} input[aria-label="score"]')`, 'input schema of active staging version');
+    await client.evaluate(`document.querySelector('${activeForm} input[aria-label="score"]').focus()`);
+    await client.send('Input.insertText', { text: '8' });
+    await client.evaluate(`document.querySelector('${activeForm} input[aria-label="score"]').blur()`);
+    assert(await client.evaluate(`(() => {
+      const form = document.querySelector('${activeForm}');
+      const run = Array.from(form.querySelectorAll('button')).find(button => button.textContent.trim() === 'Run test');
+      if (!run || run.disabled) return false;
+      run.click();
+      return true;
+    })()`), 'The author could not run the active staging decision.');
+    await client.waitFor(`(() => {
+      const text = document.querySelector('${activeForm}')?.textContent || '';
+      return text.includes('Version 1') && text.includes('Decision Trace Playback') && text.includes('"decision": "eligible"');
+    })()`, 'immutable active-version result and trace').catch(async (error) => {
+      const formText = await client.evaluate(`document.querySelector('${activeForm}')?.textContent.slice(-1500) || ''`);
+      throw new Error(`${error.message}. Browser form displayed: ${formText}`);
+    });
+    const retained = await client.evaluate(`fetch('/api/projects/${PROJECT_ID}/runs').then(response => response.json())`);
+    assert.equal(retained.runs.length, 1);
+    assert.equal(retained.runs[0].versionId, VERSION_1_ID);
+    console.log('✓ Active staging Version 1 evaluated through the browser and recorded in run history');
+
     await clickVersionOption(client, 2);
     await enterRationale(client, 'Browser smoke proposal for version two.');
     assert(await client.evaluate(buttonClickExpression('Propose release')), 'Author could not propose version two.');
