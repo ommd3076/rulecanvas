@@ -255,6 +255,17 @@ async function run() {
     });
 
     const editorPath = `/projects/${PROJECT_ID}/rules/${RULESET_ID}`;
+    await client.send('Page.navigate', { url: `${hostedBase}/` });
+    await client.waitFor(`Boolean(document.querySelector('main h1'))`, 'public homepage without an assertion');
+    const publicHomeEntered = await client.evaluate(`(() => {
+      const cta = Array.from(document.querySelectorAll('button, a')).find(element => element.textContent.trim() === 'Open workspace');
+      cta?.click();
+      return Boolean(cta);
+    })()`);
+    assert(publicHomeEntered, 'Hosted home is missing its workspace entry.');
+    await client.waitFor(`location.pathname === '/projects' && document.body.textContent.includes('Sign-in required')`, 'fail-closed workspace entry');
+    console.log('✓ Public home loads anonymously and the workspace requires sign-in');
+
     await client.send('Page.navigate', { url: `${localBase}${editorPath}` });
     await client.waitFor(`!!document.querySelector('#graph-canvas')`, 'local editor canvas');
     await client.waitFor(`document.querySelector('header')?.textContent.includes('New input')`, 'local ruleset breadcrumb');

@@ -15,7 +15,8 @@ import { createRuleCanvasServer } from '../src/server.mjs';
 import { JsonStore } from '../src/storage.mjs';
 
 test('router parses valid routes and strips trailing slashes', () => {
-  assert.deepEqual(parseRoute('/'), { type: 'projects' });
+  assert.deepEqual(parseRoute('/'), { type: 'home' });
+  assert.deepEqual(parseRoute(''), { type: 'home' });
   assert.deepEqual(parseRoute('/projects'), { type: 'projects' });
   assert.deepEqual(parseRoute('/projects/'), { type: 'projects' });
 
@@ -95,6 +96,7 @@ test('router decodes and encodes special characters in IDs', () => {
 });
 
 test('buildRouteUrl generates canonical URLs for all route states', () => {
+  assert.equal(buildRouteUrl({ type: 'home' }), '/');
   assert.equal(buildRouteUrl({ type: 'projects' }), '/projects');
   assert.equal(buildRouteUrl({ type: 'project', projectId: 'proj-1' }), '/projects/proj-1');
   assert.equal(buildRouteUrl({ type: 'runs', projectId: 'project 1' }), '/projects/project%201/runs');

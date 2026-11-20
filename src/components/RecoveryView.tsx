@@ -8,6 +8,7 @@ import {
   RiArrowLeftLine,
   RiRefreshLine,
   RiHome5Line,
+  RiLockLine,
 } from '@remixicon/react';
 
 export type RecoveryState =
@@ -28,6 +29,11 @@ export type RecoveryState =
       ruleId: string;
       actualProjectId: string;
       rulesetName: string;
+    }
+  | {
+      type: 'access_error';
+      forbidden: boolean;
+      onRetry: () => void;
     }
   | {
       type: 'network_error';
@@ -55,6 +61,20 @@ export const RecoveryView: React.FC<RecoveryViewProps> = ({
   return (
     <div className="flex h-full w-full items-center justify-center p-6 bg-background-full">
       <div className="flex w-full max-w-lg flex-col items-center rounded-3xl border border-border-button-default bg-background-primary-default p-8 text-center shadow-lg">
+        {state.type === 'access_error' && (
+          <>
+            <div className="flex size-16 items-center justify-center rounded-2xl bg-background-secondary-default text-foreground-icon-primary">
+              <RiLockLine className="size-8" aria-hidden="true" />
+            </div>
+            <h2 className="mt-4 text-title-2-medium text-text-primary">{state.forbidden ? 'Workspace access required' : 'Sign-in required'}</h2>
+            <p className="mt-2 text-body-regular text-text-secondary">
+              {state.forbidden ? 'Ask your administrator to give your account access to this workspace.' : 'Use your organization’s sign-in link to open this workspace.'}
+            </p>
+            <Button className="mt-6" variant="secondary" size="medium" leadingIcon={RiRefreshLine} onClick={state.onRetry}>
+              Reload workspace
+            </Button>
+          </>
+        )}
         {state.type === 'project_not_found' && (
           <>
             <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-status-rose-background text-status-rose-text">

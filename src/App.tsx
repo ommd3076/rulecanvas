@@ -29,6 +29,7 @@ import { serializeConflictCopy } from '@/public/conflict-copy';
 import { useSaveCoordinator } from './useSaveCoordinator';
 import { TopNav } from './components/TopNav';
 import { DashboardView } from './components/DashboardView';
+import { PublicHomePage } from './components/PublicHomePage';
 import { eligibilityExampleInput } from './example';
 import { ProjectOverviewView } from './components/ProjectOverviewView';
 import { RunsView } from './components/RunsView';
@@ -81,8 +82,11 @@ export function App() {
   const [isStartingGuidedExample, setIsStartingGuidedExample] = useState(false);
   const isStartingGuidedExampleRef = useRef(false);
   const [releaseManagementAvailable, setReleaseManagementAvailable] = useState<boolean | null>(null);
+  const [loadingProjects, setLoadingProjects] = useState(route.type === 'projects');
+  const isHome = route.type === 'home';
 
   useEffect(() => {
+    if (isHome) return;
     let active = true;
     api.getHealth().then((health) => {
       if (active) setReleaseManagementAvailable(health.releaseManagement === true);
@@ -90,7 +94,7 @@ export function App() {
       if (active) setReleaseManagementAvailable(false);
     });
     return () => { active = false; };
-  }, []);
+  }, [isHome]);
 
   // Derived View identifier for SaveCoordinator and TopNav
   const view: 'dashboard' | 'project' | 'runs' | 'editor' | 'releases' =
@@ -247,6 +251,15 @@ export function App() {
       setIsVersionHistoryOpen(false);
     }
 
+    if (targetRoute.type === 'home') {
+      setCurrentProject(null);
+      currentProjectRef.current = null;
+      setCurrentRuleset(null);
+      currentRulesetRef.current = null;
+      setRoute(targetRoute);
+      return;
+    }
+
     if (targetRoute.type === 'not_found') {
       setCurrentProject(null);
       currentProjectRef.current = null;
@@ -261,22 +274,30 @@ export function App() {
     }
 
     if (targetRoute.type === 'projects') {
+      setLoadingProjects(true);
+      setCurrentProject(null);
+      currentProjectRef.current = null;
+      setCurrentRuleset(null);
+      currentRulesetRef.current = null;
+      setRoute(targetRoute);
       try {
-        const pList = await loadProjects();
+        const { projects: list } = await api.getProjects();
         if (navigationSeqRef.current !== navId) return;
-        setProjects(pList);
-        setCurrentProject(null);
-        currentProjectRef.current = null;
-        setCurrentRuleset(null);
-        currentRulesetRef.current = null;
-        setRoute(targetRoute);
+        if (!Array.isArray(list)) throw new Error('The workspace returned an invalid project list.');
+        setProjects(list);
       } catch (err: any) {
         if (navigationSeqRef.current !== navId) return;
-        setRecoveryState({
+        setRecoveryState(err.status === 401 || err.status === 403 ? {
+          type: 'access_error',
+          forbidden: err.status === 403,
+          onRetry: () => window.location.reload(),
+        } : {
           type: 'network_error',
           message: err.message || 'Failed to load projects.',
           onRetry: () => loadRoute(targetRoute),
         });
+      } finally {
+        if (navigationSeqRef.current === navId) setLoadingProjects(false);
       }
       return;
     }
@@ -788,6 +809,14 @@ export function App() {
 
   const selectedNode = graph.nodes.find((n) => n.id === selectedNodeId) || null;
 
+  if (isHome) {
+    return (
+      <DirectionProvider locale="en-US">
+        <PublicHomePage onOpenWorkspace={() => window.location.assign('/projects')} />
+      </DirectionProvider>
+    );
+  }
+
   return (
     <DirectionProvider locale="en-US">
       <div className="flex h-screen w-screen flex-col overflow-hidden bg-background-full text-text-primary antialiased">
@@ -803,6 +832,7 @@ export function App() {
           canUndo={canUndo}
           canRedo={canRedo}
           onNavigateDashboard={() => navigateTo({ type: 'projects' })}
+          onNavigateHome={view === 'dashboard' ? () => navigateTo({ type: 'home' }) : undefined}
           onNavigateProject={() =>
             currentProject && navigateTo({ type: 'project', projectId: currentProject.id })
           }
@@ -858,7 +888,9 @@ export function App() {
           ) : (
             <>
               {/* Dashboard View */}
-              {route.type === 'projects' && (
+              {route.type === 'projects' && (loadingProjects ? (
+                <div role="status" className="mx-auto py-10 text-body-regular text-text-secondary">Loading projects…</div>
+              ) : (
                 <div className="h-full w-full overflow-y-auto">
                   <DashboardView
                     projects={projects}
@@ -868,7 +900,7 @@ export function App() {
                     isTryingExample={isStartingGuidedExample}
                   />
                 </div>
-              )}
+              ))}
 
               {/* Project Overview View */}
               {(route.type === 'project' ||

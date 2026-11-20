@@ -263,7 +263,7 @@ async function runSmoke() {
       await client.send('Page.enable');
       await client.send('DOM.enable');
       await client.send('Runtime.enable');
-      await client.send('Page.navigate', { url: `http://127.0.0.1:${freshPort}/projects` });
+      await client.send('Page.navigate', { url: `http://127.0.0.1:${freshPort}/` });
 
       // Viewport 1366x549 desktop (specific review test viewport)
       await client.send('Emulation.setDeviceMetricsOverride', {
@@ -281,6 +281,26 @@ async function runSmoke() {
       })()`);
       assert(isReactApp, 'React application #root element is empty or missing');
       console.log('✓ React app bundle verified mounted in #root');
+
+      await client.waitForFunction(`() => Boolean(document.querySelector('main h1'))`);
+      const homeOverflow = await client.eval(`document.documentElement.scrollWidth > window.innerWidth`);
+      assert(!homeOverflow, 'Horizontal overflow detected on the public home (1366px)');
+      const homeDesktop = await client.send('Page.captureScreenshot', { format: 'png' });
+      await fs.writeFile(path.join(SCREENSHOTS_DIR, '00_home_1366px.png'), Buffer.from(homeDesktop.data, 'base64'));
+
+      await client.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+      assert(!(await client.eval(`document.documentElement.scrollWidth > window.innerWidth`)), 'Horizontal overflow detected on the public home (390px)');
+      const homeMobile = await client.send('Page.captureScreenshot', { format: 'png' });
+      await fs.writeFile(path.join(SCREENSHOTS_DIR, '00_home_390px.png'), Buffer.from(homeMobile.data, 'base64'));
+      await client.send('Emulation.setDeviceMetricsOverride', { width: 1366, height: 549, deviceScaleFactor: 1, mobile: false });
+
+      assert(await client.eval(`(() => {
+        const cta = Array.from(document.querySelectorAll('button, a')).find(element => element.textContent.trim() === 'Open workspace');
+        cta?.click();
+        return Boolean(cta);
+      })()`), 'Public home is missing its workspace entry.');
+      await client.waitForFunction(`() => window.location.pathname === '/projects' && document.querySelector('h1')?.textContent === 'Your decision workspace'`);
+      console.log('✓ Public homepage and workspace entry verified at desktop and mobile viewports');
 
       // Step 1: Dashboard View
       console.log('--- Step 1: Dashboard View ---');

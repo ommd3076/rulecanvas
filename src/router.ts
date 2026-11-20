@@ -10,6 +10,7 @@ import {
 export type PanelType = 'properties' | 'schema' | 'test';
 
 export type RouteState =
+  | { type: 'home' }
   | { type: 'projects' }
   | { type: 'project'; projectId: string }
   | { type: 'runs'; projectId: string }

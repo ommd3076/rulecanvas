@@ -55,7 +55,11 @@ export function parseRoute(pathname, search = '') {
   try {
     const cleanPath = (pathname || '/').replace(/\/+$/, '') || '/';
 
-    if (cleanPath === '/' || cleanPath === '/projects') {
+    if (cleanPath === '/') {
+      return { type: 'home' };
+    }
+
+    if (cleanPath === '/projects') {
       return { type: 'projects' };
     }
 
@@ -159,8 +163,10 @@ export function parseRoute(pathname, search = '') {
 }
 
 export function buildRouteUrl(route) {
-  if (!route) return '/projects';
+  if (!route) return '/';
   switch (route.type) {
+    case 'home':
+      return '/';
     case 'projects':
       return '/projects';
     case 'project':

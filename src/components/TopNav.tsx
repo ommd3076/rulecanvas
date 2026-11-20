@@ -26,6 +26,7 @@ interface TopNavProps {
   canUndo?: boolean;
   canRedo?: boolean;
   onNavigateDashboard: () => void;
+  onNavigateHome?: () => void;
   onNavigateProject: () => void;
   onOpenReleases?: () => void;
   onOpenActivity: () => void;
@@ -50,6 +51,7 @@ export const TopNav: React.FC<TopNavProps> = ({
   canUndo = false,
   canRedo = false,
   onNavigateDashboard,
+  onNavigateHome,
   onNavigateProject,
   onOpenReleases,
   onOpenActivity,
@@ -82,8 +84,8 @@ export const TopNav: React.FC<TopNavProps> = ({
       <div className="flex min-w-0 items-center gap-3">
         <button
           type="button"
-          onClick={onNavigateDashboard}
-          aria-label="RuleCanvas projects"
+          onClick={onNavigateHome ?? onNavigateDashboard}
+          aria-label={onNavigateHome ? 'RuleCanvas home' : 'RuleCanvas projects'}
           className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-text-primary text-body-2-bold text-background-primary-default outline-none focus-visible:ring-2 focus-visible:ring-border-focus-ring"
         >
           R
