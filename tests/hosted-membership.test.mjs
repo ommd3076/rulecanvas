@@ -23,6 +23,7 @@ test('resolves a scoped store using an exact, enabled tenant membership and serv
   assert.deepEqual(await resolver.resolveReleaseRoles({ principal, store, rulesetId: 'abc' }), ['reviewer']);
   await assert.rejects(resolve('POST', '/api/projects'), { status: 403 });
   await assert.rejects(resolve('GET', '/api/projects/abc/audit'), { status: 403 });
+  await assert.rejects(resolve('GET', '/api/projects/abc/export'), { status: 403 });
   await assert.rejects(resolve('GET', '/api/projects/abc/legacy-source'), { status: 403 });
   await assert.rejects(resolve('POST', '/api/projects/import-legacy'), { status: 403 });
   await assert.rejects(resolve('POST', '/api/rulesets/abc/evaluate'), { status: 403 });
