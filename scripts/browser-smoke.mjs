@@ -716,6 +716,25 @@ async function runSmoke() {
       assert.equal(edgeCountAfterUndo, initialEdgeCount, 'Undo failed to restore the removed connection edge');
       console.log(`✓ Undo verified: edge count restored to ${edgeCountAfterUndo}`);
 
+      // Focus a different connection while the first remains selected, then delete it by keyboard.
+      const focusedEdgeLabels = await client.eval(`(() => {
+        const edges = Array.from(document.querySelectorAll('#graph-canvas [aria-label*="Connection from"]'));
+        if (edges.length < 2) return null;
+        edges[0].dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+        edges[1].focus();
+        return edges.slice(0, 2).map(edge => edge.getAttribute('aria-label'));
+      })()`);
+      assert(focusedEdgeLabels, 'Need two connections to verify focused keyboard deletion');
+      await client.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Delete', code: 'Delete', windowsVirtualKeyCode: 46 });
+      await client.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Delete', code: 'Delete', windowsVirtualKeyCode: 46 });
+      await client.waitForFunction(`() => document.querySelectorAll('#graph-canvas [aria-label*="Connection from"]').length === ${initialEdgeCount - 1}`);
+      const remainingEdgeLabels = await client.eval(`Array.from(document.querySelectorAll('#graph-canvas [aria-label*="Connection from"]')).map(edge => edge.getAttribute('aria-label'))`);
+      assert(remainingEdgeLabels.includes(focusedEdgeLabels[0]), 'Keyboard deletion removed the previously selected connection');
+      assert(!remainingEdgeLabels.includes(focusedEdgeLabels[1]), 'Keyboard deletion did not remove the focused connection');
+      await client.eval(`document.querySelector('button[aria-label="Undo"]').click()`);
+      await client.waitForFunction(`() => document.querySelectorAll('#graph-canvas [aria-label*="Connection from"]').length === ${initialEdgeCount}`);
+      console.log('✓ Keyboard deletion targets the focused connection and undo restores it');
+
       // Test Group Node and Recursive BoardUI Accordion Subgroup editing
       console.log('Testing Logic Group Node and Recursive Accordion Subgroup editing...');
       const addGroupClicked = await client.eval(`(() => {
