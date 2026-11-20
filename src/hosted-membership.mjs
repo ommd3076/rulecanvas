@@ -89,7 +89,7 @@ export function createHostedMembership({ pool, storeForTenant } = {}) {
     if (policy === 'release' && !membership.roles.some((role) => RELEASE_ROLES.has(role))) deny();
 
     let store;
-    try { store = await storeForTenant(membership.tenantId); }
+    try { store = await storeForTenant(membership.tenantId, principal.subject); }
     catch { deny(); }
     if (!store || typeof store !== 'object') deny();
     return store;

@@ -12,7 +12,11 @@ test('resolves a scoped store using an exact, enabled tenant membership and serv
       assert.deepEqual(params, ['team-a', 'test-proxy', 'member']);
       return { rows: row ? [row] : [] };
     } },
-    storeForTenant: (id) => { assert.equal(id, 'team-a'); return store; },
+    storeForTenant: (id, actor) => {
+      assert.equal(id, 'team-a');
+      assert.equal(actor, 'member');
+      return store;
+    },
   });
   const resolve = (method, pathname) => resolver.resolveAuthorizedStore({ principal, method, pathname });
   assert.equal(await resolve('GET', '/api/projects'), store);

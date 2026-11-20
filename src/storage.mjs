@@ -25,9 +25,9 @@ export class StoreError extends Error {
   }
 }
 
-function addAuditEvent(data, { projectId, rulesetId = null, type, details = {} }) {
+function addAuditEvent(data, actor, { projectId, rulesetId = null, type, details = {} }) {
   data.auditEvents.push({
-    id: randomUUID(), projectId, rulesetId, actor: 'local workspace', type,
+    id: randomUUID(), projectId, rulesetId, actor, type,
     details, occurredAt: new Date().toISOString(),
   });
 }
@@ -86,16 +86,18 @@ function slugify(value) {
 export class JsonStore {
   #file;
   #backend;
+  #actor;
   #tail = Promise.resolve();
   #recovered = false;
   #corruptOriginal = null;
 
-  constructor(file = resolve('data/rulecanvas.json'), backend = null) {
+  constructor(file = resolve('data/rulecanvas.json'), backend = null, { actor = 'local workspace' } = {}) {
     if (backend !== null && (typeof backend.read !== 'function' || typeof backend.transact !== 'function')) {
       throw new TypeError('Workspace storage requires a read and transact backend.');
     }
     this.#file = file;
     this.#backend = backend;
+    this.#actor = actor;
   }
 
   async #read() {
@@ -218,7 +220,7 @@ export class JsonStore {
         updatedAt: new Date().toISOString(),
       };
       data.projects.push(project);
-      addAuditEvent(data, { projectId: project.id, type: 'project.created', details: { slug: project.slug } });
+      addAuditEvent(data, this.#actor, { projectId: project.id, type: 'project.created', details: { slug: project.slug } });
       return project;
     });
   }
@@ -265,8 +267,8 @@ export class JsonStore {
       };
       data.projects.push(project);
       data.rulesets.push(ruleset);
-      addAuditEvent(data, { projectId: project.id, type: 'project.created', details: { slug, exampleKey: GUIDED_EXAMPLE_KEY } });
-      addAuditEvent(data, { projectId: project.id, rulesetId: ruleset.id, type: 'ruleset.created', details: { name: ruleset.name, exampleKey: GUIDED_EXAMPLE_KEY } });
+      addAuditEvent(data, this.#actor, { projectId: project.id, type: 'project.created', details: { slug, exampleKey: GUIDED_EXAMPLE_KEY } });
+      addAuditEvent(data, this.#actor, { projectId: project.id, rulesetId: ruleset.id, type: 'ruleset.created', details: { name: ruleset.name, exampleKey: GUIDED_EXAMPLE_KEY } });
       return { project, ruleset, created: true };
     });
   }
@@ -300,7 +302,7 @@ export class JsonStore {
       data.rulesets.push(ruleset);
       const project = data.projects.find((item) => item.id === projectId);
       project.updatedAt = new Date().toISOString();
-      addAuditEvent(data, { projectId, rulesetId: ruleset.id, type: 'ruleset.created', details: { name: normalizedName } });
+      addAuditEvent(data, this.#actor, { projectId, rulesetId: ruleset.id, type: 'ruleset.created', details: { name: normalizedName } });
       return ruleset;
     });
   }
@@ -325,7 +327,7 @@ export class JsonStore {
       ruleset.updatedAt = new Date().toISOString();
       const project = data.projects.find((item) => item.id === ruleset.projectId);
       if (project) project.updatedAt = ruleset.updatedAt;
-      addAuditEvent(data, { projectId: ruleset.projectId, rulesetId, type: 'ruleset.draft.saved', details: { revision: ruleset.revision } });
+      addAuditEvent(data, this.#actor, { projectId: ruleset.projectId, rulesetId, type: 'ruleset.draft.saved', details: { revision: ruleset.revision } });
       return ruleset;
     });
   }
@@ -382,7 +384,7 @@ export class JsonStore {
       ruleset.updatedAt = version.createdAt;
       const project = data.projects.find((item) => item.id === ruleset.projectId);
       if (project) project.updatedAt = version.createdAt;
-      addAuditEvent(data, { projectId: ruleset.projectId, rulesetId, type: 'ruleset.version.created', details: { versionNumber: version.versionNumber, sourceRevision: version.sourceRevision, graphHash } });
+      addAuditEvent(data, this.#actor, { projectId: ruleset.projectId, rulesetId, type: 'ruleset.version.created', details: { versionNumber: version.versionNumber, sourceRevision: version.sourceRevision, graphHash } });
       return version;
     });
   }
@@ -390,9 +392,33 @@ export class JsonStore {
   async listAuditEvents(projectId, rulesetId = null) {
     const data = await this.#read();
     if (!data.projects.some((item) => item.id === projectId)) throw new StoreError('Project not found.', 404, 'project.not_found');
-    return data.auditEvents
-      .filter((event) => event.projectId === projectId && (!rulesetId || event.rulesetId === rulesetId))
-      .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+    const projectRules = new Map(data.rulesets
+      .filter((rule) => rule.projectId === projectId && (!rulesetId || rule.id === rulesetId))
+      .map((rule) => [rule.id, rule]));
+    const releaseEvents = [];
+    for (const policy of data.releasePolicies) {
+      const rule = projectRules.get(policy.rulesetId);
+      if (!rule) continue;
+      for (const event of policy.state.auditTrail) {
+        releaseEvents.push({
+          id: `release-${rule.id}-${event.id}`,
+          projectId,
+          rulesetId: rule.id,
+          actor: event.actorId,
+          type: `release.${event.action}`,
+          occurredAt: event.timestamp,
+          details: {
+            name: rule.name,
+            environment: event.environment,
+            versionId: event.versionId,
+            rationale: event.rationale,
+          },
+        });
+      }
+    }
+    const projectEvents = data.auditEvents.filter((event) =>
+      event.projectId === projectId && (!rulesetId || event.rulesetId === rulesetId));
+    return [...projectEvents, ...releaseEvents].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
   }
 
   async getReleasePolicy(rulesetId) {

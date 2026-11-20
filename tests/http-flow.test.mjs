@@ -132,6 +132,17 @@ test('hosted release actions use stored versions and server-assigned roles', asy
   assert.match(JSON.stringify(policy.body.policy), new RegExp(version.id));
   const reopened = new JsonStore(releaseStoreFile);
   assert.equal((await reopened.getActiveReleaseVersion(ruleset.id, 'production')).id, version.id);
+  const events = await reopened.listAuditEvents(project.id, ruleset.id);
+  const rollback = events.find((event) => event.type === 'release.rollback');
+  assert.equal(rollback.actor, 'deployer');
+  assert.equal(rollback.details.environment, 'production');
+  assert.equal(rollback.details.versionId, version.id);
+  assert.equal(rollback.details.rationale, selected.rationale);
+  assert.equal(events.find((event) => event.type === 'release.approve').actor, 'reviewer');
+  assert.equal(events.find((event) => event.type === 'ruleset.created').actor, 'local workspace');
+  const secondary = await reopened.createProject('Unrelated project');
+  const secondaryEvents = await reopened.listAuditEvents(secondary.id);
+  assert.deepEqual(secondaryEvents.map((event) => event.type), ['project.created']);
 });
 
 test('creates and reloads a project and ruleset through the local HTTP API', async (t) => {

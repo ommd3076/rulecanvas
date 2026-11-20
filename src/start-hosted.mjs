@@ -40,7 +40,7 @@ try {
   if (!schema?.workspaces || !schema?.memberships) throw new Error('Hosted schema migrations are required.');
   const membership = createHostedMembership({
     pool,
-    storeForTenant: (tenantId) => new JsonStore(null, createPostgresWorkspaceBackend({ pool, tenantId })),
+    storeForTenant: (tenantId, actor) => new JsonStore(null, createPostgresWorkspaceBackend({ pool, tenantId }), { actor }),
   });
   const checkReadiness = async () => { await pool.query({ text: 'SELECT 1', query_timeout: 2000 }); };
   const server = createRuleCanvasServer({ hosted: { assertion, storageType: 'postgres', checkReadiness, ...membership } });

@@ -426,7 +426,7 @@ export const AuditModal: React.FC<AuditModalProps> = ({
     <Modal isOpen={isOpen} onOpenChange={(open) => !open && onClose()} size="lg">
       <ModalHeader
         title={`Audit Log · ${projectName}`}
-        description="Immutable local event journal of all project modifications, draft saves, and version snapshots."
+        description="Review who created, edited, or released rules in this project."
         icon={RiShieldCheckLine}
       />
       <ModalBody>
@@ -456,15 +456,14 @@ export const AuditModal: React.FC<AuditModalProps> = ({
                         </span>
                       </Cell>
                       <Cell>
-                        <span className="text-body-2-regular text-text-primary">
-                          {event.details?.name
-                            ? `Rule set: ${event.details.name}`
-                            : event.details?.action
-                            ? `Action: ${event.details.action}`
-                            : event.rulesetId
-                            ? `Ruleset ID: ${event.rulesetId}`
-                            : JSON.stringify(event.details || {})}
-                        </span>
+                        <div className="flex min-w-0 flex-col gap-1 text-body-2-regular text-text-primary">
+                          {event.details?.name && <span>{event.details.name}</span>}
+                          {event.details?.slug && <span>{event.details.slug}</span>}
+                          {event.details?.versionNumber && <span>Version {event.details.versionNumber} · Revision {event.details.sourceRevision}</span>}
+                          {event.details?.revision && <span>Revision {event.details.revision}</span>}
+                          {event.details?.environment && <span className="text-text-secondary">{event.details.environment}</span>}
+                          {event.details?.rationale && <span className="wrap-anywhere text-text-secondary">{event.details.rationale}</span>}
+                        </div>
                       </Cell>
                       <Cell className="text-end">
                         <span className="text-caption-1-regular text-text-tertiary">
