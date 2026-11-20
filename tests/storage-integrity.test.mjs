@@ -30,6 +30,33 @@ test('uses the transactional workspace backend and preserves immutable graph has
   assert.equal(contents, checkpoint);
 });
 
+test('exports only the requested project and its related records', async () => {
+  let contents = null;
+  const backend = {
+    read: async () => contents,
+    transact: async (change) => {
+      const result = await change(contents);
+      contents = result.contents;
+      return result.value;
+    },
+  };
+  const store = new JsonStore(null, backend);
+  const first = await store.createProject('First');
+  const second = await store.createProject('Second');
+  const rule = await store.createRuleset(first.id, 'Decision');
+  await store.createRuleset(second.id, 'Private rule');
+  await store.saveRuleset(rule.id, rule.revision, validGraph(), rule.name);
+  await store.createVersion(rule.id, rule.revision + 1);
+  await store.createTestScenario(rule.id, { name: 'Boundary', inputs: { score: 8 }, expectedOutcomeId: 'eligible' });
+  const exported = await store.exportProject(first.id);
+  assert.equal(exported.format, 'RuleCanvas.ProjectExport.v1');
+  assert.equal(exported.rulesets.length, 1);
+  assert.equal(exported.versions.length, 1);
+  assert.equal(exported.scenarios.length, 1);
+  assert(!JSON.stringify(exported).includes('Private rule'));
+  await assert.rejects(store.exportProject('missing'), { code: 'project.not_found' });
+});
+
 test('reopens rule-scoped test scenarios and keeps their inputs out of project activity', async () => {
   let contents = null;
   const backend = {
