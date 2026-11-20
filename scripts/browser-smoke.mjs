@@ -3,7 +3,6 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import net from 'node:net';
-import os from 'node:os';
 import { createBrowserSmokeFixture } from './browser-smoke-fixture.mjs';
 
 const EDGE_PATH = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
@@ -181,7 +180,7 @@ async function runSmoke() {
   const freshPort = await getFreePort();
   console.log(`1. Starting RuleCanvas Node server on fresh port: ${freshPort}`);
 
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'rulecanvas-smoke-'));
+  const workspace = await fs.mkdtemp(path.resolve('reports', 'temp-browser-'));
   const dataFile = path.join(workspace, 'smoke.json');
   const debugPort = await getFreePort();
   await fs.writeFile(dataFile, `${JSON.stringify(createBrowserSmokeFixture(), null, 2)}\n`, 'utf8');
@@ -264,7 +263,7 @@ async function runSmoke() {
       await client.send('Page.enable');
       await client.send('DOM.enable');
       await client.send('Runtime.enable');
-      await client.send('Page.navigate', { url: `http://127.0.0.1:${freshPort}/` });
+      await client.send('Page.navigate', { url: `http://127.0.0.1:${freshPort}/projects` });
 
       // Viewport 1366x549 desktop (specific review test viewport)
       await client.send('Emulation.setDeviceMetricsOverride', {
@@ -286,7 +285,8 @@ async function runSmoke() {
       // Step 1: Dashboard View
       console.log('--- Step 1: Dashboard View ---');
       const dashboardTitle = await client.eval(`document.querySelector('h1')?.textContent || ''`);
-      assert.equal(dashboardTitle.trim(), 'Projects', `Expected 'Projects' heading, got: '${dashboardTitle}'`);
+      assert.equal(dashboardTitle.trim(), 'Your decision workspace');
+      assert(await client.eval(`Array.from(document.querySelectorAll('button')).some(button => button.textContent.trim() === 'Try guided example')`), 'Guided onboarding is missing in a populated workspace');
 
       // Check overflow on desktop
       const isDashboardOverflow = await client.eval(`document.documentElement.scrollWidth > window.innerWidth`);
