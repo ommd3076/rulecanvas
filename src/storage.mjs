@@ -232,6 +232,25 @@ export class JsonStore {
     return project.legacySource;
   }
 
+  async exportProject(projectId) {
+    const data = await this.#read();
+    const project = data.projects.find((item) => item.id === projectId);
+    if (!project) throw new StoreError('Project not found.', 404, 'project.not_found');
+    const rulesets = data.rulesets.filter((item) => item.projectId === projectId);
+    const ruleIds = new Set(rulesets.map((item) => item.id));
+    return {
+      format: 'RuleCanvas.ProjectExport.v1',
+      exportedAt: new Date().toISOString(),
+      project,
+      rulesets,
+      versions: data.versions.filter((item) => ruleIds.has(item.rulesetId)),
+      scenarios: data.testScenarios.filter((item) => ruleIds.has(item.rulesetId)),
+      runs: data.evaluationRuns.filter((item) => item.projectId === projectId),
+      auditEvents: data.auditEvents.filter((item) => item.projectId === projectId),
+      releasePolicies: data.releasePolicies.filter((item) => ruleIds.has(item.rulesetId)),
+    };
+  }
+
   async createProject(name) {
     const normalizedName = typeof name === 'string' ? name.trim() : '';
     if (!normalizedName || normalizedName.length > 80) {
