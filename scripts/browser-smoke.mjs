@@ -618,6 +618,43 @@ async function runSmoke() {
       assert.equal(newNodeCount, initialNodeCount + 1, 'Node count did not increment after clicking Add Condition');
       console.log(`✓ Node count incremented to ${newNodeCount} after Add Condition`);
 
+      // Use the real keyboard port controls to attempt a cycle. Keep the original branch intact on rejection.
+      const keyPort = async (label, nodeIndex = null) => {
+        const found = await client.eval(`(() => {
+          const scope = ${nodeIndex === null ? "document.querySelector('#graph-canvas')" : `document.querySelectorAll('#graph-canvas g.cursor-move')[${nodeIndex}]`};
+          const port = scope?.querySelector(${JSON.stringify(`[aria-label="${label}"]`)});
+          if (!port) return false;
+          port.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+          return true;
+        })()`);
+        assert(found, `Missing graph port: ${label}`);
+      };
+      await keyPort('Connect true branch from score');
+      await keyPort('Connect into score', 4);
+      await client.waitForFunction(`() => document.querySelector('#graph-canvas [aria-label="Connection from score to score; press Enter to select, Delete to remove"]') !== null`);
+      const beforeCycle = await client.eval(`document.querySelectorAll('#graph-canvas [aria-label*="Connection from"]').length`);
+      await keyPort('Connect true branch from score', 4);
+      await client.waitForFunction(`() => document.body.textContent.includes('Connecting from')`);
+      await keyPort('Connect into score', 1);
+      await client.waitForFunction(`() => document.body.textContent.includes('Connection rejected because it would create a cycle.')`);
+      assert.equal(await client.eval(`document.querySelectorAll('#graph-canvas [aria-label*="Connection from"]').length`), beforeCycle);
+      assert(await client.eval(`!!document.querySelector('#graph-canvas [aria-label="Connection from score to score; press Enter to select, Delete to remove"]')`));
+      console.log('✓ Cyclic keyboard connection rejected without changing existing branches');
+
+      // Both branches may converge on the same valid outcome.
+      await keyPort('Connect false branch from score');
+      await keyPort('Connect into Eligible');
+      await client.waitForFunction(`() => document.querySelectorAll('#graph-canvas [aria-label="Connection from score to Eligible; press Enter to select, Delete to remove"]').length === 1`);
+      await keyPort('Connect true branch from score');
+      await keyPort('Connect into Eligible');
+      await client.waitForFunction(`() => document.querySelectorAll('#graph-canvas [aria-label="Connection from score to Eligible; press Enter to select, Delete to remove"]').length === 2`);
+      console.log('✓ Converging branches accepted through keyboard port controls');
+      // Restore fixture branches for subsequent editor checks.
+      await keyPort('Connect false branch from score', 1);
+      await keyPort('Connect into Review');
+      await client.waitForFunction(`() => document.querySelector('#graph-canvas [aria-label="Connection from score to Review; press Enter to select, Delete to remove"]') !== null`);
+      await client.eval(`document.querySelectorAll('#graph-canvas g.cursor-move')[4].dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))`);
+
       // Verify Delete Node toolbar button to remove the added condition node
       console.log('Testing Canvas Authoring (Delete Node)...');
       const deleteNodeClicked = await client.eval(`(() => {
@@ -1282,6 +1319,24 @@ async function runSmoke() {
       await client.eval(`Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === 'Run test').click()`);
       await client.waitForFunction(`() => Array.from(document.querySelectorAll('[role="status"]')).some(status => status.textContent.includes('${scenarioLabel}') && status.textContent.includes('PASS') && status.textContent.includes('Actual outcome: Eligible'))`);
       console.log('✓ Scenario saved, reloaded from persistence, and evaluated with PASS against the expected outcome');
+
+      await client.navigateTo(versionUrl, { expectedHeading: 'Version History' });
+      await client.waitForFunction(`() => document.body.textContent.includes('Immutable Version')`);
+      await client.waitForFunction(`() => Array.from(document.querySelectorAll('button')).some(button => button.textContent.trim() === 'Compare scenarios')`);
+      await client.eval(`Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === 'Compare scenarios').click()`);
+      await client.waitForFunction(`() => document.querySelector('[aria-label="Scenario comparison"]')?.textContent.includes('${scenarioLabel}')`);
+      assert(await client.eval(`document.querySelector('[aria-label="Scenario comparison"]').textContent.includes('Same')`), 'Saved scenario comparison should match identical graphs');
+      const changed = await client.eval(`(async () => {
+        const path = '/api/rulesets/07c973f2-f12b-4040-8b73-db027627f338';
+        const { ruleset } = await (await fetch(path)).json();
+        ruleset.graph.nodes.find(node => node.id === 'score-check').value = 9;
+        const response = await fetch(path, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedRevision: ruleset.revision, graph: ruleset.graph, name: ruleset.name }) });
+        return response.ok;
+      })()`);
+      assert(changed, 'Could not prepare a different saved draft for comparison');
+      await client.eval(`Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === 'Compare scenarios').click()`);
+      await client.waitForFunction(`() => document.querySelector('[aria-label="Scenario comparison"]')?.textContent.includes('Changed')`);
+      console.log('✓ Saved scenario compared with immutable version and pinned saved draft');
 
       console.log('--- Step 9: Legacy project import ---');
       const legacySchema = [{ id: 'field-score', key: 'score', label: 'Score', type: 'number', required: true, defaultValue: 8 }];

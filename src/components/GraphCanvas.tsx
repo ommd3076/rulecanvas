@@ -1238,6 +1238,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault();
+                          e.stopPropagation();
                           if (connectionSource) {
                             completeConnection(
                               connectionSource.nodeId,

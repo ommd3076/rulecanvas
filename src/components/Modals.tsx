@@ -7,6 +7,7 @@ import {
   AlertDialog,
 } from '@/components/base/modal/modal';
 import { Button } from '@/components/base/buttons/button';
+import { VersionScenarioComparison } from './VersionScenarioComparison';
 import { Input } from '@/components/base/input/input';
 import { Textarea } from '@/components/base/textarea/textarea';
 import { Chip } from '@/components/base/badges/chip';
@@ -373,6 +374,7 @@ export const VersionHistoryModal: React.FC<VersionHistoryModalProps> = ({
               </div>
 
               {/* Test against this version */}
+              {rulesetId && <VersionScenarioComparison key={`${rulesetId}:${selectedVersion.id}`} rulesetId={rulesetId} version={selectedVersion} />}
               <div className="mt-2 flex flex-col gap-2 border-t border-separator-border pt-3">
                 <span className="text-caption-1-medium text-text-secondary uppercase">
                   Evaluate Input against Version {selectedVersion.versionNumber}
