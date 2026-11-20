@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import type { RuleGraph, RuleNode, RuleEdge } from '@/src/api';
+import { wouldCreateCycle } from '@/public/graph-editing.js';
 import { Button } from '@/components/base/buttons/button';
 import { IconButton } from '@/components/base/buttons/icon-button';
 import { AlertDialog } from '@/components/base/modal/modal';
@@ -230,6 +231,13 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
       const filteredEdges = graph.edges.filter(
         (edge) => !(edge.from === fromNodeId && edge.fromPort === fromPort)
       );
+
+      if (wouldCreateCycle(filteredEdges, fromNodeId, toNodeId)) {
+        setConnectionSource(null);
+        setConnectionDraft(null);
+        setAnnouncement('Connection rejected because it would create a cycle.');
+        return;
+      }
 
       const newEdge: RuleEdge = {
         id: `edge_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
