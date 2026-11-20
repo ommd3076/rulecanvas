@@ -281,6 +281,11 @@ export function createRuleCanvasServer({ store: localStore, hosted } = {}) {
         sendJson(response, 200, { project: await store.getProject(match[1]) });
         return;
       }
+      match = url.pathname.match(/^\/api\/projects\/([0-9a-f-]+)\/export$/i);
+      if (match && method === 'GET') {
+        sendJson(response, 200, await store.exportProject(match[1]));
+        return;
+      }
       match = url.pathname.match(/^\/api\/projects\/([0-9a-f-]+)\/rulesets$/i);
       if (match && method === 'POST') {
         const body = await readBody(request);
