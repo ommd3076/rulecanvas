@@ -56,6 +56,17 @@ export const ProjectOverviewView: React.FC<ProjectOverviewViewProps> = ({
             } catch (error) { toast.error(error instanceof Error ? error.message : 'Original export could not be downloaded.'); }
           }}>Download original export</Button>}
           <Button variant="secondary" size="medium" onClick={onOpenRuns}>Evaluation runs</Button>
+          <Button variant="secondary" size="medium" onClick={async () => {
+            try {
+              const snapshot = await api.exportProject(project.id);
+              const url = URL.createObjectURL(new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' }));
+              const link = document.createElement('a');
+              link.href = url;
+              link.download = `rulecanvas-project-${project.id}.json`;
+              link.click();
+              URL.revokeObjectURL(url);
+            } catch (error) { toast.error(error instanceof Error ? error.message : 'Project could not be exported.'); }
+          }}>Export project data</Button>
           {rulesets.length > 0 && <SearchField
             aria-label="Search rule sets"
             placeholder="Find a rule set"
