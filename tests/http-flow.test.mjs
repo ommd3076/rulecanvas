@@ -149,6 +149,20 @@ test('hosted release actions use stored versions and server-assigned roles', asy
   assert.deepEqual(secondaryEvents.map((event) => event.type), ['project.created']);
 });
 
+test('project data export returns only records from the requested project', async (t) => {
+  const base = await startServer(t);
+  const create = (name) => jsonRequest(base, '/api/projects', { method: 'POST', body: JSON.stringify({ name }) });
+  const first = (await create('Export project')).body.project;
+  const second = (await create('Other project')).body.project;
+  await jsonRequest(base, `/api/projects/${first.id}/rulesets`, { method: 'POST', body: JSON.stringify({ name: 'Exported rule' }) });
+  await jsonRequest(base, `/api/projects/${second.id}/rulesets`, { method: 'POST', body: JSON.stringify({ name: 'Other rule' }) });
+  const result = await jsonRequest(base, `/api/projects/${first.id}/export`);
+  assert.equal(result.status, 200);
+  assert.equal(result.body.format, 'RuleCanvas.ProjectExport.v1');
+  assert.deepEqual(result.body.rulesets.map((rule) => rule.name), ['Exported rule']);
+  assert(!JSON.stringify(result.body).includes('Other rule'));
+});
+
 test('creates and reloads a project and ruleset through the local HTTP API', async (t) => {
   const base = await startServer(t);
   const createdProject = await jsonRequest(base, '/api/projects', {
