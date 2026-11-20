@@ -97,7 +97,9 @@ export function translateLegacyProject(envelope) {
       throw new Error('Legacy scenarios need unique names, descriptions and scalar input values.');
     }
     scenarioNames.add(scenario.name.trim().toLowerCase());
-    const outcomes = graph.nodes.filter((node) => node.type === 'outcome' && node.result.outcomeCode === scenario.expectedOutcomeCode);
+    const outcomes = typeof scenario.expectedOutcomeCode === 'string' && scenario.expectedOutcomeCode.trim()
+      ? graph.nodes.filter((node) => node.type === 'outcome' && node.result.outcomeCode === scenario.expectedOutcomeCode)
+      : [];
     return { ...scenario, expectedOutcomeId: outcomes.length === 1 ? outcomes[0].id : null };
   });
   if (versions.length > 100 || scenarios.length > 100) throw new Error('Import supports at most 100 versions and 100 scenarios.');

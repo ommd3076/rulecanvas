@@ -38,6 +38,14 @@ test('rejects legacy behavior the current rule engine cannot preserve', () => {
   assert.throws(() => translateLegacyProject({ project: input.project }), /ProjectExport/);
 });
 
+test('does not invent an expected outcome when the legacy scenario has no assertion', () => {
+  const input = fixture();
+  delete input.project.testScenarios[0].expectedOutcomeCode;
+  delete input.project.nodes[2].outcomeCode;
+  const result = translateLegacyProject(input);
+  assert.equal(result.scenarios[0].expectedOutcomeId, null);
+});
+
 test('preserves converging branches and evaluates each route to the same outcome', () => {
   const input = fixture();
   const graph = input.project;
