@@ -3,7 +3,7 @@ import { SearchField } from '@/components/base/search-field/search-field';
 import { Button } from '@/components/base/buttons/button';
 import { IconButton } from '@/components/base/buttons/icon-button';
 import { Table, TableBody, TableCell, TableColumn, TableHeader, TableRow } from '@/components/base/table/table';
-import { RiAddLine, RiArrowRightLine, RiGitBranchLine, RiHistoryLine } from '@remixicon/react';
+import { RiAddLine, RiArrowRightLine, RiFileCopyLine, RiGitBranchLine, RiHistoryLine } from '@remixicon/react';
 import type { ProjectDetail } from '@/src/api';
 import { api } from '@/src/api';
 import { toast } from 'sonner';
@@ -14,6 +14,7 @@ interface ProjectOverviewViewProps {
   onOpenVersions: (rulesetId: string, rulesetName: string) => void;
   onNewRuleset: () => void;
   onOpenRuns: () => void;
+  onDuplicateRuleset: (rulesetId: string) => Promise<void>;
 }
 
 export const ProjectOverviewView: React.FC<ProjectOverviewViewProps> = ({
@@ -22,8 +23,11 @@ export const ProjectOverviewView: React.FC<ProjectOverviewViewProps> = ({
   onOpenVersions,
   onNewRuleset,
   onOpenRuns,
+  onDuplicateRuleset,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [duplicating, setDuplicating] = useState<string | null>(null);
+  const duplicationRef = React.useRef(false);
   const rulesets = project.rulesets || [];
   const filteredRulesets = useMemo(
     () => rulesets.filter((ruleset) => ruleset.name.toLowerCase().includes(searchQuery.toLowerCase())),
@@ -90,6 +94,19 @@ export const ProjectOverviewView: React.FC<ProjectOverviewViewProps> = ({
                 </TableCell>
                 <TableCell className="text-end">
                   <div className="flex items-center justify-end gap-1">
+                    <IconButton
+                      size="small"
+                      icon={RiFileCopyLine}
+                      aria-label={`Duplicate ${ruleset.name} as a draft with its scenarios`}
+                      disabled={duplicating !== null}
+                      onClick={async () => {
+                        if (duplicationRef.current) return;
+                        duplicationRef.current = true;
+                        setDuplicating(ruleset.id);
+                        try { await onDuplicateRuleset(ruleset.id); }
+                        finally { duplicationRef.current = false; setDuplicating(null); }
+                      }}
+                    />
                     <IconButton
                       size="small"
                       icon={RiHistoryLine}

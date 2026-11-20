@@ -287,6 +287,11 @@ export function createRuleCanvasServer({ store: localStore, hosted } = {}) {
         sendJson(response, 201, { ruleset: await store.createRuleset(match[1], body.name) });
         return;
       }
+      match = url.pathname.match(/^\/api\/rulesets\/([0-9a-f-]+)\/duplicate$/i);
+      if (match && method === 'POST') {
+        sendJson(response, 201, { ruleset: await store.duplicateRuleset(match[1]) });
+        return;
+      }
       match = url.pathname.match(/^\/api\/rulesets\/([0-9a-f-]+)$/i);
       if (match && method === 'GET') {
         sendJson(response, 200, { ruleset: await store.getRuleset(match[1]) });

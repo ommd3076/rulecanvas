@@ -188,6 +188,31 @@ test('creates and reloads a project and ruleset through the local HTTP API', asy
   assert.deepEqual(reloaded.body.project.rulesets[0].graph, validGraph());
 });
 
+test('duplicates a draft and its scenarios without copying versions or releases', async (t) => {
+  const base = await startServer(t);
+  const { body: { project } } = await jsonRequest(base, '/api/projects', { method: 'POST', body: JSON.stringify({ name: 'Copy fixture' }) });
+  const { body: { ruleset } } = await jsonRequest(base, `/api/projects/${project.id}/rulesets`, { method: 'POST', body: JSON.stringify({ name: 'Decision' }) });
+  const path = `/api/rulesets/${ruleset.id}`;
+  await jsonRequest(base, path, { method: 'PUT', body: JSON.stringify({ expectedRevision: 1, graph: validGraph(), name: ruleset.name }) });
+  await jsonRequest(base, `${path}/versions`, { method: 'POST', body: JSON.stringify({ expectedRevision: 2 }) });
+  await jsonRequest(base, `${path}/scenarios`, { method: 'POST', body: JSON.stringify({ name: 'Boundary', inputs: { score: 8 }, expectedOutcomeId: 'eligible' }) });
+  const first = await jsonRequest(base, `${path}/duplicate`, { method: 'POST', body: '{}' });
+  const second = await jsonRequest(base, `${path}/duplicate`, { method: 'POST', body: '{}' });
+  assert.equal(first.status, 201);
+  assert.equal(first.body.ruleset.name, 'Decision (copy)');
+  assert.equal(second.body.ruleset.name, 'Decision (copy 2)');
+  assert.equal(first.body.ruleset.revision, 1);
+  assert.equal(first.body.ruleset.status, 'draft');
+  assert.deepEqual(first.body.ruleset.graph, validGraph());
+  const copyPath = `/api/rulesets/${first.body.ruleset.id}`;
+  assert.equal((await jsonRequest(base, `${copyPath}/versions`)).body.versions.length, 0);
+  const scenarios = (await jsonRequest(base, `${copyPath}/scenarios`)).body.scenarios;
+  assert.equal(scenarios.length, 1);
+  assert.deepEqual(scenarios[0].inputs, { score: 8 });
+  assert.equal(scenarios[0].expectedOutcomeId, 'eligible');
+  assert.equal((await jsonRequest(base, path)).body.ruleset.revision, 2);
+});
+
 test('creates and replays a saved typed scenario without altering a rule revision', async (t) => {
   const base = await startServer(t);
   const { body: { project } } = await jsonRequest(base, '/api/projects', { method: 'POST', body: JSON.stringify({ name: 'Scenario project' }) });

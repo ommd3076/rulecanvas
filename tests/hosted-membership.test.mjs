@@ -26,6 +26,7 @@ test('resolves a scoped store using an exact, enabled tenant membership and serv
   await assert.rejects(resolve('GET', '/api/projects/abc/legacy-source'), { status: 403 });
   await assert.rejects(resolve('POST', '/api/projects/import-legacy'), { status: 403 });
   await assert.rejects(resolve('POST', '/api/rulesets/abc/evaluate'), { status: 403 });
+  await assert.rejects(resolve('POST', '/api/rulesets/abc/duplicate'), { status: 403 });
   await assert.rejects(resolve('GET', '/api/rulesets/abc/scenarios'), { status: 403 });
   await assert.rejects(resolve('POST', '/api/unknown'), { status: 403 });
   row = { ...row, roles: ['runner'] };

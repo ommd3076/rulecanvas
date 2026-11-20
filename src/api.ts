@@ -270,6 +270,7 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ name }),
   }),
+  duplicateRuleset: (rulesetId: string) => request<{ ruleset: RulesetDetail }>(`/api/rulesets/${encodeURIComponent(rulesetId)}/duplicate`, { method: 'POST' }),
   getRuleset: (id: string) => request<{ ruleset: RulesetDetail }>(`/api/rulesets/${encodeURIComponent(id)}`),
   saveRuleset: (id: string, expectedRevision: number, graph: RuleGraph, name: string) => request<{ ruleset: RulesetDetail }>(`/api/rulesets/${encodeURIComponent(id)}`, {
     method: 'PUT',

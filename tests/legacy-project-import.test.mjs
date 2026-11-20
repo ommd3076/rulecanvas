@@ -46,6 +46,29 @@ test('does not invent an expected outcome when the legacy scenario has no assert
   assert.equal(result.scenarios[0].expectedOutcomeId, null);
 });
 
+test('rejects a legacy version number that leaves no safe number for the next version', () => {
+  const input = fixture();
+  input.project.versions[0].versionNumber = Number.MAX_SAFE_INTEGER;
+  assert.throws(() => translateLegacyProject(input), /safe integer limit/);
+});
+
+test('existing exhausted version numbers cannot create an unsafe or duplicate version', async () => {
+  let contents = null;
+  const backend = { read: async () => contents, transact: async (change) => {
+    const result = await change(contents);
+    contents = result.contents;
+    return result.value;
+  } };
+  const store = new JsonStore(null, backend);
+  const imported = await store.importLegacyProject(fixture());
+  const data = JSON.parse(contents);
+  data.versions[0].versionNumber = Number.MAX_SAFE_INTEGER;
+  contents = JSON.stringify(data);
+  const before = contents;
+  await assert.rejects(store.createVersion(imported.ruleset.id, 1), { code: 'version.number_exhausted' });
+  assert.equal(contents, before);
+});
+
 test('preserves converging branches and evaluates each route to the same outcome', () => {
   const input = fixture();
   const graph = input.project;

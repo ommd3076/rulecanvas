@@ -943,6 +943,15 @@ export function App() {
                       }}
                       onOpenRuns={() => navigateTo({ type: 'runs', projectId: currentProject.id })}
                       onNewRuleset={() => setIsCreateRulesetOpen(true)}
+                      onDuplicateRuleset={async (rulesetId) => {
+                        try {
+                          const { ruleset } = await api.duplicateRuleset(rulesetId);
+                          toast.success('Copied as a new draft with its test scenarios.');
+                          await navigateTo({ type: 'editor', projectId: currentProject.id, ruleId: ruleset.id });
+                        } catch (error) {
+                          toast.error(error instanceof Error ? error.message : 'Could not duplicate the rule set.');
+                        }
+                      }}
                     />
                   </div>
                 )}

@@ -345,6 +345,33 @@ export class JsonStore {
     return ruleset;
   }
 
+  async duplicateRuleset(rulesetId) {
+    return this.#transact((data) => {
+      const source = data.rulesets.find((item) => item.id === rulesetId);
+      if (!source) throw new StoreError('Ruleset not found.', 404, 'ruleset.not_found');
+      const project = data.projects.find((item) => item.id === source.projectId);
+      if (!project) throw new StoreError('Project not found.', 404, 'project.not_found');
+      const existingNames = new Set(data.rulesets.filter((item) => item.projectId === project.id).map((item) => item.name.toLowerCase()));
+      let suffix = ' (copy)';
+      let name = `${source.name.slice(0, 80 - suffix.length)}${suffix}`;
+      let index = 2;
+      while (existingNames.has(name.toLowerCase())) {
+        suffix = ` (copy ${index++})`;
+        name = `${source.name.slice(0, 80 - suffix.length)}${suffix}`;
+      }
+      const now = new Date().toISOString();
+      const copy = { id: randomUUID(), projectId: project.id, name, revision: 1, status: 'draft', graph: structuredClone(source.graph), createdAt: now, updatedAt: now };
+      const scenarios = data.testScenarios.filter((item) => item.rulesetId === source.id).map((item) => ({
+        ...structuredClone(item), id: randomUUID(), rulesetId: copy.id, createdAt: now,
+      }));
+      data.rulesets.push(copy);
+      data.testScenarios.push(...scenarios);
+      project.updatedAt = now;
+      addAuditEvent(data, this.#actor, { projectId: project.id, rulesetId: copy.id, type: 'ruleset.duplicated', details: { name, sourceRulesetId: source.id, scenarioCount: scenarios.length } });
+      return copy;
+    });
+  }
+
   async createRuleset(projectId, name) {
     const normalizedName = typeof name === 'string' ? name.trim() : '';
     if (!normalizedName || normalizedName.length > 80) {
@@ -429,6 +456,9 @@ export class JsonStore {
       const graphJson = JSON.stringify(ruleset.graph);
       const graphHash = createHash('sha256').update(graphJson).digest('hex');
       const existing = data.versions.filter((version) => version.rulesetId === rulesetId).sort((a, b) => b.versionNumber - a.versionNumber)[0];
+      if (existing && (!Number.isSafeInteger(existing.versionNumber) || existing.versionNumber < 1 || existing.versionNumber >= Number.MAX_SAFE_INTEGER)) {
+        throw new StoreError('This rule set has exhausted its supported version numbers.', 409, 'version.number_exhausted');
+      }
       if (existing?.graphHash === graphHash) {
         throw new StoreError('This graph is already the latest saved version.', 409, 'version.unchanged');
       }

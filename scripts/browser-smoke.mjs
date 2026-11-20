@@ -812,6 +812,14 @@ async function runSmoke() {
       await sleep(500);
       const auditScreenshot = await client.send('Page.captureScreenshot', { format: 'png' });
       await fs.writeFile(path.join(SCREENSHOTS_DIR, '06_audit_log.png'), Buffer.from(auditScreenshot.data, 'base64'));
+      await client.eval(`document.querySelector('[aria-label="Filter audit events"]').click()`);
+      await client.waitForFunction(`() => Array.from(document.querySelectorAll('[role="option"]')).some(option => option.textContent.trim() === 'Versions')`);
+      await client.eval(`Array.from(document.querySelectorAll('[role="option"]')).find(option => option.textContent.trim() === 'Versions').click()`);
+      await client.waitForFunction(`() => document.querySelector('[role="dialog"]')?.textContent.includes('No activity matches this filter.')`);
+      await client.eval(`document.querySelector('[aria-label="Filter audit events"]').click()`);
+      await client.waitForFunction(`() => Array.from(document.querySelectorAll('[role="option"]')).some(option => option.textContent.trim() === 'All activity')`);
+      await client.eval(`Array.from(document.querySelectorAll('[role="option"]')).find(option => option.textContent.trim() === 'All activity').click()`);
+      await client.waitForFunction(`() => document.querySelector('[role="dialog"]')?.textContent.includes('ruleset.draft.saved')`);
       await client.eval(`(() => {
         const dialog = document.querySelector('[role="dialog"]');
         Array.from(dialog.querySelectorAll('button')).find(button => button.textContent.trim() === 'Close')?.click();
@@ -1376,6 +1384,28 @@ async function runSmoke() {
       const original = await client.eval(`fetch('/api/projects/${imported.id}/legacy-source').then(response => response.json())`);
       assert.deepEqual(original.source, legacy);
       console.log('✓ Legacy export reviewed, imported and preserved with its version, scenario, and browser-local source untouched');
+
+      console.log('--- Step 10: Duplicate rule set ---');
+      const duplicateLabel = `Duplicate ${importedRule.name} as a draft with its scenarios`;
+      const duplicateClicked = await client.eval(`(() => {
+        const button = document.querySelector(${JSON.stringify(`button[aria-label="${duplicateLabel}"]`)});
+        if (!button || button.disabled) return false;
+        button.click();
+        return true;
+      })()`);
+      assert(duplicateClicked, 'Duplicate rule-set action was unavailable');
+      await client.waitForFunction(`() => window.location.pathname.includes('/rules/') && !!document.querySelector('#graph-canvas')`);
+      const copyId = await client.eval(`window.location.pathname.split('/').at(-1)`);
+      assert.notEqual(copyId, importedRule.id);
+      const copied = await client.eval(`fetch('/api/rulesets/${copyId}').then(response => response.json())`);
+      const copiedVersions = await client.eval(`fetch('/api/rulesets/${copyId}/versions').then(response => response.json())`);
+      const copiedScenarios = await client.eval(`fetch('/api/rulesets/${copyId}/scenarios').then(response => response.json())`);
+      assert.equal(copied.ruleset.name, `${importedRule.name} (copy)`);
+      assert.equal(copied.ruleset.revision, 1);
+      assert.deepEqual(copied.ruleset.graph, (await client.eval(`fetch('/api/rulesets/${importedRule.id}').then(response => response.json())`)).ruleset.graph);
+      assert.equal(copiedVersions.versions.length, 0);
+      assert.equal(copiedScenarios.scenarios[0].name, 'Legacy boundary');
+      console.log('✓ Duplicated a draft and its scenarios; original version history remains separate');
 
       // Assert zero runtime errors or unhandled exceptions occurred
       assert.equal(

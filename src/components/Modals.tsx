@@ -9,6 +9,7 @@ import {
 import { Button } from '@/components/base/buttons/button';
 import { VersionScenarioComparison } from './VersionScenarioComparison';
 import { Input } from '@/components/base/input/input';
+import { Select, SelectItem } from '@/components/base/select/select';
 import { Textarea } from '@/components/base/textarea/textarea';
 import { Chip } from '@/components/base/badges/chip';
 import { Table } from '@/components/base/table/table';
@@ -453,6 +454,13 @@ export const AuditModal: React.FC<AuditModalProps> = ({
   auditEvents,
   onClose,
 }) => {
+  const [category, setCategory] = useState('all');
+  const visibleEvents = auditEvents.filter((event) => {
+    if (category === 'all') return true;
+    if (category === 'draft') return event.type.startsWith('ruleset.') && !event.type.startsWith('ruleset.version.');
+    if (category === 'versions') return event.type.startsWith('ruleset.version.');
+    return event.type.startsWith(`${category}.`);
+  });
   return (
     <Modal isOpen={isOpen} onOpenChange={(open) => !open && onClose()} size="lg">
       <ModalHeader
@@ -462,8 +470,20 @@ export const AuditModal: React.FC<AuditModalProps> = ({
       />
       <ModalBody>
         <div className="py-2">
+          {auditEvents.length > 0 && <div className="mb-4 max-w-64">
+            <Select aria-label="Filter audit events" selectedKey={category} onSelectionChange={(key) => setCategory(String(key ?? 'all'))}>
+              <SelectItem id="all">All activity</SelectItem>
+              <SelectItem id="project">Projects</SelectItem>
+              <SelectItem id="draft">Rules and drafts</SelectItem>
+              <SelectItem id="versions">Versions</SelectItem>
+              <SelectItem id="release">Releases</SelectItem>
+              <SelectItem id="test">Test scenarios</SelectItem>
+            </Select>
+          </div>}
           {auditEvents.length === 0 ? (
             <p className="text-body-regular text-text-tertiary">No audit events recorded yet.</p>
+          ) : visibleEvents.length === 0 ? (
+            <p role="status" className="text-body-regular text-text-tertiary">No activity matches this filter.</p>
           ) : (
             <div className="overflow-hidden rounded-2xl border border-border-button-default">
               <Table aria-label="Audit log table" size="sm">
@@ -474,7 +494,7 @@ export const AuditModal: React.FC<AuditModalProps> = ({
                   <Column className="text-end">Occurred</Column>
                 </TableHeader>
                 <TableBody>
-                  {auditEvents.map((event) => (
+                  {visibleEvents.map((event) => (
                     <Row key={event.id}>
                       <Cell>
                         <Chip variant="caption" color="purple">

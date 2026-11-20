@@ -82,8 +82,8 @@ export function translateLegacyProject(envelope) {
   if (project.name.trim().length > 80) throw new Error('Project names cannot exceed 80 characters.');
   const versionNumbers = new Set();
   const versions = project.versions.map((version) => {
-    if (!version || !Number.isSafeInteger(version.versionNumber) || version.versionNumber < 1 || versionNumbers.has(version.versionNumber) || !Number.isFinite(Date.parse(version.createdAt))) {
-      throw new Error('Legacy versions need unique positive version numbers and valid creation dates.');
+    if (!version || !Number.isSafeInteger(version.versionNumber) || version.versionNumber < 1 || version.versionNumber >= Number.MAX_SAFE_INTEGER || versionNumbers.has(version.versionNumber) || !Number.isFinite(Date.parse(version.createdAt))) {
+      throw new Error('Legacy versions need unique positive version numbers below the safe integer limit and valid creation dates.');
     }
     versionNumbers.add(version.versionNumber);
     return { ...version, graph: translateGraph(version.snapshot) };
