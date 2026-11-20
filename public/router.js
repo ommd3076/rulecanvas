@@ -63,6 +63,10 @@ export function parseRoute(pathname, search = '') {
       return { type: 'projects' };
     }
 
+    if (cleanPath === '/projects/team') {
+      return { type: 'team' };
+    }
+
     // /projects/:projectId/runs
     const runsMatch = cleanPath.match(/^\/projects\/([^/]+)\/runs$/);
     if (runsMatch) {
@@ -169,6 +173,8 @@ export function buildRouteUrl(route) {
       return '/';
     case 'projects':
       return '/projects';
+    case 'team':
+      return '/projects/team';
     case 'project':
       return `/projects/${encodeURIComponent(route.projectId)}`;
     case 'runs':

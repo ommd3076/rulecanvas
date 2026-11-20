@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
 import type { RuleGraph, RuleNode, RuleEdge } from '@/src/api';
 import { Button } from '@/components/base/buttons/button';
 import { IconButton } from '@/components/base/buttons/icon-button';
+import { AlertDialog } from '@/components/base/modal/modal';
 import { Dropdown, DropdownItem, DropdownPopover, DropdownTrigger } from '@/components/base/dropdown/dropdown';
 import {
   RiAddLine,
@@ -31,7 +32,7 @@ interface GraphCanvasProps {
   onSelectNode: (nodeId: string | null) => void;
   onUpdateGraph: (updatedGraph: RuleGraph, reason?: string) => void;
   onAddNode: (type: 'condition' | 'group' | 'outcome') => void;
-  onDeleteSelectedNode: () => void;
+  onDeleteSelectedNode: (nodeIds: string[]) => void;
 }
 
 export const GraphCanvas: React.FC<GraphCanvasProps> = ({
@@ -65,6 +66,12 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   // Node drag state
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [selectedNodes, setSelectedNodes] = useState<string[]>([]);
+  const dragOrigins = useRef<Map<string, { x: number; y: number }>>(new Map());
+
+  useEffect(() => {
+    setSelectedNodes((current) => selectedNodeId && current.includes(selectedNodeId) ? current : selectedNodeId ? [selectedNodeId] : []);
+  }, [selectedNodeId]);
 
   // Connection state: click-to-connect source
   const [connectionSource, setConnectionSource] = useState<{
@@ -85,6 +92,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   // Selected edge state
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
+  const [nodePendingDelete, setNodePendingDelete] = useState<{ ids: string[]; title: string } | null>(null);
 
   const NODE_WIDTH = 240;
   const NODE_HEIGHT = 120;
@@ -177,6 +185,28 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
       setAnnouncement('Connection removed');
     }
   }, [graph, selectedEdgeId, onUpdateGraph]);
+
+  const requestDeleteSelectedNode = useCallback(() => {
+    if (!selectedNodeId) return;
+    const node = graph.nodes.find((item) => item.id === selectedNodeId);
+    if (!node) return;
+    const ids = selectedNodes.length ? selectedNodes : [node.id];
+    const deletable = graph.nodes.filter((item) => ids.includes(item.id) && item.type !== 'start');
+    if (!deletable.length) { setAnnouncement('The Start node cannot be deleted'); return; }
+    setNodePendingDelete({ ids: deletable.map((item) => item.id), title: deletable.length === 1 ? getNodeTitle(deletable[0]) : `${deletable.length} selected nodes` });
+  }, [selectedNodeId, selectedNodes, graph.nodes, getNodeTitle]);
+
+  const confirmDeleteSelectedNode = useCallback(() => {
+    if (!nodePendingDelete) return;
+    if (nodePendingDelete.ids.every((id) => selectedNodes.includes(id) && graph.nodes.some((node) => node.id === id))) {
+      onDeleteSelectedNode(nodePendingDelete.ids);
+      setSelectedNodes([]);
+      setAnnouncement(`${nodePendingDelete.title} deleted`);
+    } else {
+      setAnnouncement('Node selection changed; nothing was deleted');
+    }
+    setNodePendingDelete(null);
+  }, [nodePendingDelete, selectedNodes, graph.nodes, onDeleteSelectedNode]);
 
   // Complete connection between source port and target input port
   const completeConnection = useCallback(
@@ -283,6 +313,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   // Keyboard navigation & shortcuts (Move node, Pan canvas, Delete, Backspace, Escape, Undo, Redo, Zoom)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (nodePendingDelete) return;
       const activeEl = document.activeElement;
       if (
         activeEl &&
@@ -317,12 +348,15 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         const step = e.shiftKey ? 40 : 10;
         const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
         const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+        const moving = graph.nodes.filter((node) => selectedNodes.includes(node.id));
+        const safeDx = Math.max(dx, 20 - Math.min(...moving.map((node) => node.x)));
+        const safeDy = Math.max(dy, 20 - Math.min(...moving.map((node) => node.y)));
         const updatedNodes = graph.nodes.map((n) => {
-          if (n.id === selectedNodeId) {
+          if (selectedNodes.includes(n.id)) {
             return {
               ...n,
-              x: Math.max(20, n.x + dx),
-              y: Math.max(20, n.y + dy),
+              x: n.x + safeDx,
+              y: n.y + safeDy,
             };
           }
           return n;
@@ -360,7 +394,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedNodeId) {
           e.preventDefault();
-          onDeleteSelectedNode();
+          requestDeleteSelectedNode();
         } else if (selectedEdgeId) {
           e.preventDefault();
           handleDeleteSelectedEdge();
@@ -379,9 +413,12 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
     selectedNodeId,
+    selectedNodes,
     selectedEdgeId,
     graph,
     onDeleteSelectedNode,
+    requestDeleteSelectedNode,
+    nodePendingDelete,
     handleDeleteSelectedEdge,
     onSelectNode,
     onUpdateGraph,
@@ -448,12 +485,18 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
       const pointerX = (e.clientX - svgRect.left - pan.x) / zoom;
       const pointerY = (e.clientY - svgRect.top - pan.y) / zoom;
 
+      const anchor = dragOrigins.current.get(draggingNodeId);
+      if (!anchor) return;
+      const origins = [...dragOrigins.current.values()];
+      const dx = Math.max(Math.round(pointerX - dragOffset.x - anchor.x), 20 - Math.min(...origins.map((item) => item.x)));
+      const dy = Math.max(Math.round(pointerY - dragOffset.y - anchor.y), 20 - Math.min(...origins.map((item) => item.y)));
       const newNodes = graph.nodes.map((n) => {
-        if (n.id === draggingNodeId) {
+        const origin = dragOrigins.current.get(n.id);
+        if (origin) {
           return {
             ...n,
-            x: Math.round(Math.max(20, pointerX - dragOffset.x)),
-            y: Math.round(Math.max(20, pointerY - dragOffset.y)),
+            x: origin.x + dx,
+            y: origin.y + dy,
           };
         }
         return n;
@@ -498,8 +541,13 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   // Node drag start
   const handleNodePointerDown = (e: React.PointerEvent, node: RuleNode) => {
     e.stopPropagation();
-    onSelectNode(node.id);
+    const isToggle = e.shiftKey;
+    const next = isToggle ? (selectedNodes.includes(node.id) ? selectedNodes.filter((id) => id !== node.id) : [...selectedNodes, node.id]) : selectedNodes.includes(node.id) ? selectedNodes : [node.id];
+    setSelectedNodes(next);
+    onSelectNode(next.includes(node.id) ? node.id : next.at(-1) ?? null);
     setSelectedEdgeId(null);
+    if (!next.includes(node.id)) return;
+    dragOrigins.current = new Map(graph.nodes.filter((item) => next.includes(item.id)).map((item) => [item.id, { x: item.x, y: item.y }]));
 
     const svgRect = containerRef.current?.getBoundingClientRect();
     if (!svgRect) return;
@@ -682,7 +730,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
               variant="danger"
               size="small"
               leadingIcon={RiDeleteBinLine}
-              onClick={onDeleteSelectedNode}
+              onClick={requestDeleteSelectedNode}
             >
               Delete Node
             </Button>
@@ -942,7 +990,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
 
           {/* Render Nodes */}
           {graph.nodes.map((node) => {
-            const isSelected = selectedNodeId === node.id;
+            const isSelected = selectedNodes.includes(node.id);
             const isTraceActive = activeTraceNodeId === node.id;
             const nodeTitle = getNodeTitle(node);
             const nodeSubtitle = getNodeSubtitle(node);
@@ -963,12 +1011,15 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
-                    onSelectNode(node.id);
+                    const next = e.shiftKey ? (selectedNodes.includes(node.id) ? selectedNodes.filter((id) => id !== node.id) : [...selectedNodes, node.id]) : [node.id];
+                    setSelectedNodes(next);
+                    onSelectNode(next.includes(node.id) ? node.id : next.at(-1) ?? null);
                     setSelectedEdgeId(null);
-                    setAnnouncement(`Selected ${nodeTitle}`);
+                    setAnnouncement(`${next.length} ${next.length === 1 ? 'node' : 'nodes'} selected`);
                   } else if (e.key === 'Delete' || e.key === 'Backspace') {
                     e.preventDefault();
-                    onDeleteSelectedNode();
+                    e.stopPropagation();
+                    requestDeleteSelectedNode();
                   }
                 }}
               >
@@ -1408,6 +1459,16 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
           })}
         </g>
       </svg>
+
+      <AlertDialog
+        data-testid="confirm-delete-rule-node"
+        isOpen={nodePendingDelete !== null}
+        onOpenChange={(isOpen) => { if (!isOpen) setNodePendingDelete(null); }}
+        title="Delete rule node?"
+        description={nodePendingDelete ? `“${nodePendingDelete.title}” will be removed from this rule set. Connected links and evaluation paths may change.` : undefined}
+        confirmLabel="Delete node"
+        onConfirm={confirmDeleteSelectedNode}
+      />
     </div>
   );
 };

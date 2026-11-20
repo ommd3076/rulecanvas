@@ -6,6 +6,7 @@ import { evaluateGraph, validateGraph } from './rule-engine.mjs';
 import { JsonStore, StoreError } from './storage.mjs';
 import { HostedAuthError, verifyRequestAssertion } from './hosted-auth.mjs';
 import { ReleasePolicyError } from './release-policy.mjs';
+import { HostedTeamError } from './hosted-team.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const distDirectory = resolve(root, 'dist');
@@ -47,17 +48,22 @@ async function persistEvaluationRun(store, graph, result, metadata) {
 function readBody(request) {
   return new Promise((resolveBody, reject) => {
     let size = 0;
+    let done = false;
     const chunks = [];
     request.on('data', (chunk) => {
+      if (done) return;
       size += chunk.length;
       if (size > MAX_BODY_BYTES) {
+        done = true;
         reject(new StoreError('Request body is too large.', 413, 'request.too_large'));
-        request.destroy();
+        request.resume();
         return;
       }
       chunks.push(chunk);
     });
     request.on('end', () => {
+      if (done) return;
+      done = true;
       try {
         const text = Buffer.concat(chunks).toString('utf8');
         const body = text ? JSON.parse(text) : {};
@@ -70,7 +76,11 @@ function readBody(request) {
         reject(new StoreError('Request body must be valid JSON.', 400, 'request.json'));
       }
     });
-    request.on('error', reject);
+    request.on('error', (err) => {
+      if (done) return;
+      done = true;
+      reject(err);
+    });
   });
 }
 
@@ -164,6 +174,7 @@ export function createRuleCanvasServer({ store: localStore, hosted } = {}) {
     throw new TypeError('Hosted mode requires assertion configuration and an authorized store resolver.');
   }
   if (hosted === undefined) localStore ??= new JsonStore();
+  const team = hosted?.team ?? (typeof hosted?.listMembers === 'function' ? hosted : undefined);
   return createServer(async (request, response) => {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Referrer-Policy', 'no-referrer');
@@ -199,11 +210,44 @@ export function createRuleCanvasServer({ store: localStore, hosted } = {}) {
         if (!store) throw new HostedAuthError('auth.denied', 403);
       }
       if (url.pathname === '/api/health' && method === 'GET') {
+        let isTeamAdmin = false;
+        if (team && principal) {
+          if (typeof hosted?.isAdmin === 'function') {
+            isTeamAdmin = await hosted.isAdmin(principal);
+          } else if (typeof hosted?.lookupMembership === 'function') {
+            try {
+              const membership = await hosted.lookupMembership(principal);
+              isTeamAdmin = membership?.roles?.includes('admin') === true;
+            } catch {
+              isTeamAdmin = false;
+            }
+          }
+        }
         sendJson(response, 200, {
           ok: true, storage: hosted?.storageType ?? 'local-json', recovered: store.wasRecovered?.() ?? false,
           ...(typeof hosted?.resolveReleaseRoles === 'function' ? { releaseManagement: true } : {}),
+          ...(isTeamAdmin ? { teamManagement: true } : {}),
         });
         return;
+      }
+      if (team && url.pathname === '/api/team/members') {
+        if (method === 'GET') {
+          const members = await team.listMembers(principal);
+          sendJson(response, 200, { members });
+          return;
+        }
+        if (method === 'POST') {
+          const body = await readBody(request);
+          const member = await team.addMember(principal, body);
+          sendJson(response, 201, { member });
+          return;
+        }
+        if (method === 'PATCH') {
+          const body = await readBody(request);
+          const member = await team.updateMember(principal, body);
+          sendJson(response, 200, { member });
+          return;
+        }
       }
       if (url.pathname === '/api/projects' && method === 'GET') {
         sendJson(response, 200, { projects: await store.listProjects() });
@@ -249,6 +293,30 @@ export function createRuleCanvasServer({ store: localStore, hosted } = {}) {
       if (match && method === 'POST') {
         const body = await readBody(request);
         sendJson(response, 201, { version: await store.createVersion(match[1], body.expectedRevision) });
+        return;
+      }
+      match = url.pathname.match(/^\/api\/rulesets\/([0-9a-f-]+)\/scenarios(?:\/([0-9a-f-]+))?$/i);
+      if (match && !match[2] && method === 'GET') {
+        const scenarios = await store.listTestScenarios(match[1]);
+        let canEdit = !hosted;
+        if (hosted) {
+          try {
+            canEdit = Boolean(await hosted.resolveAuthorizedStore({ principal, method: 'POST', pathname: url.pathname }));
+          } catch (error) {
+            if (!(error instanceof HostedAuthError) || error.status !== 403) throw error;
+          }
+        }
+        sendJson(response, 200, { scenarios, canEdit });
+        return;
+      }
+      if (match && !match[2] && method === 'POST') {
+        sendJson(response, 201, { scenario: await store.createTestScenario(match[1], await readBody(request)) });
+        return;
+      }
+      if (match && match[2] && method === 'DELETE') {
+        await store.deleteTestScenario(match[1], match[2]);
+        response.writeHead(204);
+        response.end();
         return;
       }
       match = url.pathname.match(/^\/api\/rulesets\/([0-9a-f-]+)\/versions\/([0-9a-f-]+)(?:\/(evaluate))?$/i);
@@ -351,6 +419,10 @@ export function createRuleCanvasServer({ store: localStore, hosted } = {}) {
         return;
       }
       if (error instanceof ReleasePolicyError) {
+        sendJson(response, error.status, { error: { code: error.code, message: error.message } });
+        return;
+      }
+      if (error instanceof HostedTeamError || error?.name === 'HostedTeamError') {
         sendJson(response, error.status, { error: { code: error.code, message: error.message } });
         return;
       }

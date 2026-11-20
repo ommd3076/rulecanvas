@@ -1,11 +1,10 @@
 # RuleCanvas
 
-RuleCanvas by ENNORM is a local visual workbench for analysts who need to explain how business rules choose an outcome. Build a decision graph, test boundary cases, and save a version you can replay later.
+RuleCanvas by ENNORM is a visual workbench for teams that need to build, test, and explain business rules. Create a decision graph, exercise boundary cases, and replay saved versions. Hosted workspaces add team access controls, version approvals, and environment deployments.
 
-## Current vertical slice
+## Product workflow
 
-- Create a named project and reopen it from local JSON storage.
-- Try a guided eligibility rule from an empty workspace. Run the prefilled boundary case and follow the trace through each node.
+- Open the product homepage at `/` and enter the Projects workspace. Create a project or launch the guided eligibility example and follow a boundary case through each node.
 - Create a draft ruleset with a persistent revision number.
 - Edit an interactive SVG graph: drag condition, logic-group, and outcome nodes from the palette, move nodes, and connect typed flow ports by pointer or keyboard.
 - Build nested AND/OR groups in the inspector with typed condition leaves; nested groups explicitly define mixed-operator precedence and expose true/false graph branches.
@@ -20,7 +19,7 @@ RuleCanvas by ENNORM is a local visual workbench for analysts who need to explai
 - Keep a conflicting unsaved draft in the editor, warn before leaving the page, and offer a local JSON download before reloading the server copy.
 - Export the current draft to versioned JSON and import either a draft export or conflict copy after server-side graph validation.
 - Save valid drafts as immutable, locally stored graph versions with SHA-256 consistency hashes; replay a chosen version independently from later draft edits. Hashes can detect accidental or one-sided changes, but are not authentication or tamper-proof protection against someone who can edit the local data file.
-- Record local project and ruleset creation, draft-save, and version-save events for inspection through the API.
+- Review project creation, draft edits, saved versions, and hosted release activity. Hosted events identify the signed actor.
 - Inspect saved versions and project activity in the app, and replay a saved version with its own typed input form.
 - Migrate the known pre-versioned JSON shape on the next write and refuse unknown future data versions without rewriting them.
 - Keep node coordinates as layout metadata; evaluation semantics use node and edge data only.
@@ -48,11 +47,11 @@ On Windows with Microsoft Edge installed, run `node scripts/browser-smoke.mjs` a
 - `src/server.mjs` serves the app and a small JSON API, binding to `127.0.0.1` by default.
 - `src/App.tsx` and `src/components/` contain the React workspace. `public/` provides shared browser modules, static assets, and the legacy shell served when a React build is absent.
 
-This is a local single-user prototype. Version records and the event ledger are local workspace data, not a hosted publishing or approval system; there is no authentication, role system, remote database, actor identity beyond `local workspace`, or multi-process locking. A previous pre-write checkpoint is kept beside the JSON data file as `.bak`; if the active file is malformed, the app loads that prior snapshot and shows a persistent recovery notice. Before a recovery write replaces the damaged file, the exact original bytes are preserved in a unique `.corrupt-*` sidecar. Recovery can roll back the most recent successful write, does not recover a deleted file, and is not a substitute for external backups. Local file persistence and a same-process conflict test do not establish production durability or multi-user concurrency. Do not bind this server to a public interface.
+Local mode uses a single-user JSON store and labels audit events `local workspace`. A pre-write checkpoint is kept beside the JSON file as `.bak`. If the active file is malformed, RuleCanvas loads the previous snapshot and shows a recovery notice. The next successful write also preserves the original bytes in a `.corrupt-*` file. Keep local mode on loopback and maintain external backups for workspace data.
 
 The server factory also has an integration seam for a trusted authentication proxy. When called with `hosted`, every API request requires a short-lived signed assertion and an application-supplied `resolveAuthorizedStore` callback. That callback receives the verified principal and must enforce membership and permissions and select the tenant's scoped store. The standard `npm start` command uses the local configuration. A production deployment still requires a configured ingress, durable tenant storage, and operational testing.
 
-When the hosted integration supplies `resolveReleaseRoles`, `GET /api/rulesets/:id/releases` reads release history and `POST` to the same URL accepts `propose`, `approve`, `reject`, `activate`, or `rollback`. The server supplies the actor from the signed identity and resolves the version from the authorized store. Activation and rollback require the expected active version ID (`null` when empty). `POST /api/rulesets/:id/releases/:environment/evaluate` evaluates the environment's active immutable graph and reports its version. The release routes require hosted configuration and server-assigned roles.
+When the hosted integration supplies `resolveReleaseRoles`, `GET /api/rulesets/:id/releases` reads release history and `POST` to the same URL accepts `propose`, `approve`, `reject`, `activate`, or `rollback`. The server supplies the actor from the signed identity and resolves the version from the authorized store. Activation and rollback require the expected active version ID (`null` when empty). In Releases, an author, runner, or admin can test the deployed version against its own typed schema and inspect the resulting trace. The evaluation endpoint `POST /api/rulesets/:id/releases/:environment/evaluate` accepts `input` and optional `expectedVersionId` and reports the exact version used. A stale expected version returns `409` before evaluation.
 
 ### Hosted startup
 
@@ -60,6 +59,8 @@ When the hosted integration supplies `resolveReleaseRoles`, `GET /api/rulesets/:
 2. Configure `RULECANVAS_DATABASE_URL`, `RULECANVAS_ASSERTION_ISSUER`, `RULECANVAS_ASSERTION_AUDIENCE`, and `RULECANVAS_ASSERTION_SECRET`. Supply the assertion secret as a base64url-encoded key of at least 32 random bytes through your secret manager.
 3. Populate enabled memberships with the exact tenant, issuer, and subject used by the authentication proxy. Roles are `author`, `reviewer`, `deployer`, `runner`, and `admin`.
 4. Build the frontend and run `npm run start:hosted`. Put a trusted TLS proxy in front of the loopback listener. The proxy must replace incoming identity headers and mint short-lived `x-rulecanvas-assertion` credentials with `iss`, `aud`, `sub`, `tenant`, `iat`, and `exp`. Maintain database backups and test restoration before serving customer data.
+
+For hosted Team settings, apply `db/003-team-audit.sql`, allow the runtime account to insert memberships and update their `roles` and `enabled` columns, and grant `INSERT` on `public.hosted_team_membership_audit`. Set `RULECANVAS_TEAM_MANAGEMENT=1` for that runtime. An existing administrator can then add or update operational roles for SSO subjects in their tenant. Bootstrap administrator accounts through your deployment's existing membership setup. Each successful change and its audit record commit together. Disabled memberships lose access on their next authenticated API request.
 
 To opt into the database integration test, point `RULECANVAS_TEST_DATABASE_URL` at a disposable PostgreSQL test database. The test never uses the hosted application's database environment variable.
 

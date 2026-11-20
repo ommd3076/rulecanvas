@@ -132,6 +132,17 @@ export interface EvaluationResult {
   errors?: Array<{ code: string; message: string }>;
 }
 
+export interface TestScenario {
+  id: string;
+  name: string;
+  description: string;
+  inputs: Record<string, string | number | boolean | null>;
+  expectedOutcomeId: string | null;
+  createdAt: string;
+}
+
+type TestScenarioDraft = Pick<TestScenario, 'name' | 'description' | 'inputs'> & { expectedOutcomeId?: string | null };
+
 export interface ActiveReleaseEvaluationResult extends EvaluationResult {
   environment: string;
   version: {
@@ -201,6 +212,22 @@ export interface ReleaseStateResponse {
   roles: string[];
 }
 
+export type TeamRole = 'admin' | 'author' | 'reviewer' | 'deployer' | 'runner';
+
+export interface TeamMember {
+  subject: string;
+  roles: TeamRole[];
+  enabled: boolean;
+}
+
+type TeamMemberDraft = { subject: string; roles: TeamRole[]; enabled?: boolean };
+type TeamMemberUpdate = {
+  subject: string;
+  expected: Pick<TeamMember, 'roles' | 'enabled'>;
+  roles?: TeamRole[];
+  enabled?: boolean;
+};
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(path, {
     ...options,
@@ -223,7 +250,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  getHealth: () => request<{ ok: boolean; storage: string; recovered: boolean; releaseManagement?: boolean }>('/api/health'),
+  getHealth: () => request<{ ok: boolean; storage: string; recovered: boolean; releaseManagement?: boolean; teamManagement?: boolean }>('/api/health'),
 
   getProjects: () => request<{ projects: ProjectSummary[] }>('/api/projects'),
   createGuidedExample: () => request<{ project: ProjectDetail; ruleset: RulesetDetail; created: boolean }>('/api/examples/eligibility', {
@@ -279,6 +306,18 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(params),
   }),
+  getTeamMembers: () => request<{ members: TeamMember[] }>('/api/team/members'),
+  addTeamMember: (member: TeamMemberDraft) => request<{ member: TeamMember }>('/api/team/members', {
+    method: 'POST', body: JSON.stringify(member),
+  }),
+  updateTeamMember: (member: TeamMemberUpdate) => request<{ member: TeamMember }>('/api/team/members', {
+    method: 'PATCH', body: JSON.stringify(member),
+  }),
+  listScenarios: (rulesetId: string) => request<{ scenarios: TestScenario[]; canEdit: boolean }>(`/api/rulesets/${encodeURIComponent(rulesetId)}/scenarios`),
+  createScenario: (rulesetId: string, scenario: TestScenarioDraft) => request<{ scenario: TestScenario }>(`/api/rulesets/${encodeURIComponent(rulesetId)}/scenarios`, {
+    method: 'POST', body: JSON.stringify(scenario),
+  }),
+  deleteScenario: (rulesetId: string, scenarioId: string) => request<void>(`/api/rulesets/${encodeURIComponent(rulesetId)}/scenarios/${encodeURIComponent(scenarioId)}`, { method: 'DELETE' }),
   evaluateActiveRelease: (rulesetId: string, environment: string, input: Record<string, any>, expectedVersionId: string) => request<ActiveReleaseEvaluationResult>(
     `/api/rulesets/${encodeURIComponent(rulesetId)}/releases/${encodeURIComponent(environment)}/evaluate`,
     { method: 'POST', body: JSON.stringify({ input, expectedVersionId }) },

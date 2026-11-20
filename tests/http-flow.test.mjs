@@ -188,6 +188,29 @@ test('creates and reloads a project and ruleset through the local HTTP API', asy
   assert.deepEqual(reloaded.body.project.rulesets[0].graph, validGraph());
 });
 
+test('creates and replays a saved typed scenario without altering a rule revision', async (t) => {
+  const base = await startServer(t);
+  const { body: { project } } = await jsonRequest(base, '/api/projects', { method: 'POST', body: JSON.stringify({ name: 'Scenario project' }) });
+  const { body: { ruleset } } = await jsonRequest(base, `/api/projects/${project.id}/rulesets`, { method: 'POST', body: JSON.stringify({ name: 'Scenario rule' }) });
+  const rulePath = `/api/rulesets/${ruleset.id}`;
+  const savedRule = await jsonRequest(base, rulePath, {
+    method: 'PUT', body: JSON.stringify({ expectedRevision: ruleset.revision, graph: validGraph(), name: ruleset.name }),
+  });
+  const path = `${rulePath}/scenarios`;
+  const created = await jsonRequest(base, path, {
+    method: 'POST', body: JSON.stringify({ name: 'Score floor', inputs: { score: 8 }, expectedOutcomeId: 'eligible' }),
+  });
+  assert.equal(created.status, 201);
+  assert.deepEqual((await jsonRequest(base, path)).body, { scenarios: [created.body.scenario], canEdit: true });
+  const replay = await jsonRequest(base, `${rulePath}/evaluate`, {
+    method: 'POST', body: JSON.stringify({ input: created.body.scenario.inputs, expectedRevision: savedRule.body.ruleset.revision }),
+  });
+  assert.equal(replay.body.outcomeId, created.body.scenario.expectedOutcomeId);
+  const deleted = await fetch(`${base}${path}/${created.body.scenario.id}`, { method: 'DELETE' });
+  assert.equal(deleted.status, 204);
+  assert.deepEqual((await jsonRequest(base, path)).body, { scenarios: [], canEdit: true });
+});
+
 test('guided example creation is atomic and idempotent across concurrent requests and retries', async (t) => {
   const base = await startServer(t);
   const requests = await Promise.all(Array.from({ length: 6 }, () =>

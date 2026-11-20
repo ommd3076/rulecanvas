@@ -627,7 +627,9 @@ async function runSmoke() {
         return true;
       })()`);
       assert(deleteNodeClicked, 'Could not find or click Delete Node button');
-      await sleep(600);
+      await client.waitForFunction(`() => !!document.querySelector('[role="alertdialog"]')`);
+      await client.eval(`Array.from(document.querySelectorAll('[role="alertdialog"] button')).find(button => button.textContent.trim() === 'Delete node').click()`);
+      await client.waitForFunction(`() => document.querySelectorAll('g.cursor-move').length === ${initialNodeCount}`);
 
       const restoredNodeCount = await client.eval(`document.querySelectorAll('g.cursor-move').length`);
       assert.equal(restoredNodeCount, initialNodeCount, 'Node count did not restore to initial after clicking Delete Node');
@@ -723,7 +725,40 @@ async function runSmoke() {
         return true;
       })()`);
       assert(deleteGroupClicked, 'Could not find or click Delete Node button for group node');
+      await client.waitForFunction(`() => !!document.querySelector('[role="alertdialog"]')`);
+      await client.eval(`Array.from(document.querySelectorAll('[role="alertdialog"] button')).find(button => button.textContent.trim() === 'Delete node').click()`);
       await client.waitForFunction(`() => document.querySelector('header [aria-live="polite"]')?.textContent.startsWith('Saved · Rev')`);
+
+      console.log('Testing keyboard multi-selection, group movement, deletion and undo...');
+      const beforeMulti = await client.eval(`(() => {
+        const nodes = Array.from(document.querySelectorAll('#graph-canvas g.cursor-move')).filter(node => !node.getAttribute('aria-label').startsWith('START'));
+        if (nodes.length < 2) return null;
+        nodes[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        return nodes.slice(0, 2).map(node => ({ label: node.getAttribute('aria-label'), transform: node.getAttribute('transform') }));
+      })()`);
+      assert(beforeMulti, 'Expected two non-start nodes for multi-selection');
+      await client.eval(`(() => {
+        const nodes = Array.from(document.querySelectorAll('#graph-canvas g.cursor-move')).filter(node => !node.getAttribute('aria-label').startsWith('START'));
+        nodes[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true }));
+      })()`);
+      await sleep(150);
+      await client.eval(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))`);
+      await sleep(200);
+      const afterMulti = await client.eval(`Array.from(document.querySelectorAll('#graph-canvas g.cursor-move')).filter(node => !node.getAttribute('aria-label').startsWith('START')).slice(0,2).map(node => node.getAttribute('transform'))`);
+      const coordinates = (transform) => transform.match(/translate\(([-\d.]+),\s*([-\d.]+)\)/).slice(1).map(Number);
+      for (let index = 0; index < 2; index++) {
+        const before = coordinates(beforeMulti[index].transform);
+        const after = coordinates(afterMulti[index]);
+        assert.deepEqual(after, [before[0] + 10, before[1]], 'Both selected nodes should move together');
+      }
+      await client.eval(`Array.from(document.querySelectorAll('button')).find(button => button.textContent.includes('Delete Node')).click()`);
+      await client.waitForFunction(`() => !!document.querySelector('[role="alertdialog"]')`);
+      await client.eval(`Array.from(document.querySelectorAll('[role="alertdialog"] button')).find(button => button.textContent.trim() === 'Delete node').click()`);
+      await client.waitForFunction(`() => document.querySelectorAll('#graph-canvas g.cursor-move').length === ${initialNodeCount - 2}`);
+      assert(await client.eval(`!!document.querySelector('#graph-canvas g[aria-label^="START"]')`), 'Start node was removed');
+      await client.eval(`document.querySelector('button[aria-label="Undo"]').click()`);
+      await client.waitForFunction(`() => document.querySelectorAll('#graph-canvas g.cursor-move').length === ${initialNodeCount}`);
+      console.log('✓ Selected nodes moved together and were restored by undo after confirmed deletion');
 
       // Release Checks 4 & 5: SITEMAP Deep Link, Version Replay & Recovery Views
       console.log('--- Step 5.5: Deep Link Routes, Version Replay & Recovery Views ---');
@@ -1086,6 +1121,8 @@ async function runSmoke() {
         const btn = Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Delete Node'));
         if (btn) btn.click();
       })()`);
+      await client.waitForFunction(`() => !!document.querySelector('[role="alertdialog"]')`);
+      await client.eval(`Array.from(document.querySelectorAll('[role="alertdialog"] button')).find(button => button.textContent.trim() === 'Delete node').click()`);
       await client.waitForFunction(`() => document.querySelectorAll('g.cursor-move').length === ${initialNodesBeforeDirty}`, 12000);
 
       // 5. Verify preserved forward stack & subsequent clean navigation:
@@ -1172,6 +1209,36 @@ async function runSmoke() {
       assert.equal(await client.eval(`window.location.pathname`), new URL(runHistoryUrl).pathname);
       assert.equal(await client.eval(`document.documentElement.scrollWidth`), 390);
       console.log('✓ Project runs deep link renders the earlier evaluation without horizontal page overflow');
+
+      console.log('--- Step 8: Saved scenario and expected outcome ---');
+      await client.send('Emulation.setDeviceMetricsOverride', { width: 1366, height: 768, deviceScaleFactor: 1, mobile: false });
+      const scenarioUrl = versionUrl.replace(/\/versions\/[^/]+$/, '?panel=test');
+      const scenarioField = 'input[placeholder="e.g. Eligible applicant"]';
+      const scenarioLabel = 'Score at the eligibility floor';
+      await client.navigateTo(scenarioUrl, { expectedSelector: scenarioField });
+      await client.eval(`document.querySelector('input[aria-label="score"]').focus()`);
+      await client.send('Input.insertText', { text: '8' });
+      await client.eval(`document.querySelector('input[aria-label="score"]').blur()`);
+      await client.eval(`document.querySelector('${scenarioField}').focus()`);
+      await client.send('Input.insertText', { text: scenarioLabel });
+      const expectedSelect = 'button[aria-label="Expected outcome (optional)"], [aria-label="Expected outcome (optional)"] button';
+      assert(await client.eval(`(() => {
+        const trigger = document.querySelector('${expectedSelect}');
+        trigger?.click();
+        return Boolean(trigger);
+      })()`), 'Could not open expected outcome picker');
+      await client.waitForFunction(`() => Array.from(document.querySelectorAll('[role="option"]')).some(option => option.textContent.trim() === 'Eligible')`);
+      await client.eval(`Array.from(document.querySelectorAll('[role="option"]')).find(option => option.textContent.trim() === 'Eligible').click()`);
+      await client.eval(`Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === 'Save scenario').click()`);
+      const savedList = 'ul[aria-label="Saved test scenarios"]';
+      await client.waitForFunction(`() => document.querySelector('${savedList}')?.textContent.includes('${scenarioLabel}')`);
+      await client.send('Page.reload', { ignoreCache: true });
+      await client.waitForFunction(`() => document.querySelector('${savedList}')?.textContent.includes('${scenarioLabel}')`);
+      await client.eval(`Array.from(document.querySelector('${savedList}').querySelectorAll('button')).find(button => button.textContent.trim() === 'Load').click()`);
+      await client.waitForFunction(`() => document.querySelector('input[aria-label="score"]')?.value === '8'`);
+      await client.eval(`Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === 'Run test').click()`);
+      await client.waitForFunction(`() => Array.from(document.querySelectorAll('[role="status"]')).some(status => status.textContent.includes('${scenarioLabel}') && status.textContent.includes('PASS') && status.textContent.includes('Actual outcome: Eligible'))`);
+      console.log('✓ Scenario saved, reloaded from persistence, and evaluated with PASS against the expected outcome');
 
       // Assert zero runtime errors or unhandled exceptions occurred
       assert.equal(

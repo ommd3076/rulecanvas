@@ -30,6 +30,7 @@ import { useSaveCoordinator } from './useSaveCoordinator';
 import { TopNav } from './components/TopNav';
 import { DashboardView } from './components/DashboardView';
 import { PublicHomePage } from './components/PublicHomePage';
+import { TeamSettingsView } from './components/TeamSettingsView';
 import { eligibilityExampleInput } from './example';
 import { ProjectOverviewView } from './components/ProjectOverviewView';
 import { RunsView } from './components/RunsView';
@@ -82,6 +83,7 @@ export function App() {
   const [isStartingGuidedExample, setIsStartingGuidedExample] = useState(false);
   const isStartingGuidedExampleRef = useRef(false);
   const [releaseManagementAvailable, setReleaseManagementAvailable] = useState<boolean | null>(null);
+  const [teamManagementAvailable, setTeamManagementAvailable] = useState<boolean | null>(null);
   const [loadingProjects, setLoadingProjects] = useState(route.type === 'projects');
   const isHome = route.type === 'home';
 
@@ -89,9 +91,13 @@ export function App() {
     if (isHome) return;
     let active = true;
     api.getHealth().then((health) => {
-      if (active) setReleaseManagementAvailable(health.releaseManagement === true);
+      if (!active) return;
+      setReleaseManagementAvailable(health.releaseManagement === true);
+      setTeamManagementAvailable(health.teamManagement === true);
     }).catch(() => {
-      if (active) setReleaseManagementAvailable(false);
+      if (!active) return;
+      setReleaseManagementAvailable(false);
+      setTeamManagementAvailable(false);
     });
     return () => { active = false; };
   }, [isHome]);
@@ -251,7 +257,7 @@ export function App() {
       setIsVersionHistoryOpen(false);
     }
 
-    if (targetRoute.type === 'home') {
+    if (targetRoute.type === 'home' || targetRoute.type === 'team') {
       setCurrentProject(null);
       currentProjectRef.current = null;
       setCurrentRuleset(null);
@@ -628,30 +634,18 @@ export function App() {
   };
 
   // Delete selected node with confirmation and undo preservation
-  const handleDeleteSelectedNode = () => {
-    if (!selectedNodeId) return;
-    const node = graphRef.current.nodes.find((n) => n.id === selectedNodeId);
-    if (!node) return;
-    if (node.type === 'start') {
-      toast.error('The Start node cannot be deleted.');
-      return;
-    }
-
-    const confirmed = window.confirm(
-      `Are you sure you want to delete this ${node.type} node? You can undo this action.`
-    );
-    if (!confirmed) return;
-
-    const filteredNodes = graphRef.current.nodes.filter((n) => n.id !== selectedNodeId);
-    const filteredEdges = graphRef.current.edges.filter(
-      (e) => e.from !== selectedNodeId && e.to !== selectedNodeId
-    );
+  const handleDeleteSelectedNode = (nodeIds: string[]) => {
+    const selected = new Set(nodeIds);
+    const removable = new Set(graphRef.current.nodes.filter((node) => selected.has(node.id) && node.type !== 'start').map((node) => node.id));
+    if (!removable.size) return;
+    const filteredNodes = graphRef.current.nodes.filter((n) => !removable.has(n.id));
+    const filteredEdges = graphRef.current.edges.filter((e) => !removable.has(e.from) && !removable.has(e.to));
     handleUpdateGraph(
       { ...graphRef.current, nodes: filteredNodes, edges: filteredEdges },
       'delete-node'
     );
     setSelectedNodeId(null);
-    toast.info('Node deleted (Undo available)');
+    toast.info(`${removable.size === 1 ? 'Node' : 'Nodes'} deleted (Undo available)`);
   };
 
   // Update selected node
@@ -833,6 +827,7 @@ export function App() {
           canRedo={canRedo}
           onNavigateDashboard={() => navigateTo({ type: 'projects' })}
           onNavigateHome={view === 'dashboard' ? () => navigateTo({ type: 'home' }) : undefined}
+          onOpenTeam={teamManagementAvailable && route.type === 'projects' ? () => navigateTo({ type: 'team' }) : undefined}
           onNavigateProject={() =>
             currentProject && navigateTo({ type: 'project', projectId: currentProject.id })
           }
@@ -901,6 +896,22 @@ export function App() {
                   />
                 </div>
               ))}
+
+              {route.type === 'team' && (
+                <div className="h-full w-full overflow-y-auto">
+                  {teamManagementAvailable === true ? (
+                    <TeamSettingsView onBack={() => navigateTo({ type: 'projects' })} />
+                  ) : teamManagementAvailable === null ? (
+                    <p role="status" className="p-6 text-body-regular text-text-secondary">Checking team access…</p>
+                  ) : (
+                    <main className="mx-auto flex max-w-xl flex-col items-start gap-4 px-4 py-10 sm:px-6">
+                      <h1 className="text-title-1-semibold text-text-primary">Team settings unavailable</h1>
+                      <p className="text-body-regular text-text-secondary">Team settings require an administrator in a hosted workspace with team management enabled.</p>
+                      <Button variant="secondary" size="medium" onClick={() => navigateTo({ type: 'projects' })}>Return to Projects</Button>
+                    </main>
+                  )}
+                </div>
+              )}
 
               {/* Project Overview View */}
               {(route.type === 'project' ||
@@ -1115,8 +1126,12 @@ export function App() {
 
                           {inspectorTab === 'test' && (
                             <TestRunner
+                              key={currentRuleset.id}
                               schema={graph.schema}
                               onRunTest={handleRunTest}
+                              scenarioRulesetId={currentRuleset.id}
+                              scenarioOutcomes={graph.nodes.filter((node) => node.type === 'outcome').map((node) => ({ id: node.id, label: node.label || node.id }))}
+                              onBeforeCreateScenario={flushPendingDraft}
                               onHighlightNode={(nodeId) => setActiveTraceNodeId(nodeId)}
                               initialInputValues={currentRuleset?.id === guidedExampleRulesetId ? eligibilityExampleInput : undefined}
                               guideText={currentRuleset?.id === guidedExampleRulesetId ? 'The example starts with score = 8. Run it to see the selected outcome, then step through the trace to follow each node.' : undefined}

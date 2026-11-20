@@ -6,6 +6,7 @@ RuleCanvas helps teams turn business rules into repeatable, explainable decision
 | --- | --- |
 | `/` | Public product home and workspace entry |
 | `/projects` | Search, open, or create a project |
+| `/projects/team` | Manage SSO memberships and operational roles in an enabled hosted workspace as an administrator |
 | `/projects/:projectId` | List rule sets, create a rule set, inspect project activity |
 | `/projects/:projectId/runs` | Filter retained evaluations, review counts and results, and open saved versions |
 | `/projects/:projectId/rules/:ruleId` | Canvas and properties, validation, draft save, import and export |

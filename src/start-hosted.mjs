@@ -4,6 +4,7 @@ import { createRuleCanvasServer } from './server.mjs';
 import { JsonStore } from './storage.mjs';
 import { createHostedMembership } from './hosted-membership.mjs';
 import { createPostgresWorkspaceBackend } from './postgres-workspace.mjs';
+import { createHostedTeam } from './hosted-team.mjs';
 
 function readConfig(env) {
   const databaseUrl = env.RULECANVAS_DATABASE_URL;
@@ -21,13 +22,14 @@ function readConfig(env) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be a valid TCP port.');
   const host = env.RULECANVAS_HOST ?? '127.0.0.1';
   if (!isIP(host)) throw new Error('RULECANVAS_HOST must be an IPv4 or IPv6 address.');
-  return { databaseUrl, host, port, assertion: { secret, issuer, audience, requireTenant: true } };
+  const teamManagement = env.RULECANVAS_TEAM_MANAGEMENT === '1';
+  return { databaseUrl, host, port, assertion: { secret, issuer, audience, requireTenant: true }, teamManagement };
 }
 
 let pool;
 let startupStage = 'configuration';
 try {
-  const { databaseUrl, host, port, assertion } = readConfig(process.env);
+  const { databaseUrl, host, port, assertion, teamManagement } = readConfig(process.env);
   startupStage = 'database and schema';
   pool = new pg.Pool({
     connectionString: databaseUrl,
@@ -36,14 +38,18 @@ try {
     idle_in_transaction_session_timeout: 15_000,
   });
   pool.on('error', () => process.stderr.write('RuleCanvas database connection lost.\n'));
-  const { rows: [schema] } = await pool.query("SELECT to_regclass('rulecanvas_workspaces') AS workspaces, to_regclass('public.hosted_tenant_memberships') AS memberships");
-  if (!schema?.workspaces || !schema?.memberships) throw new Error('Hosted schema migrations are required.');
+  const schemaQuery = teamManagement
+    ? "SELECT to_regclass('rulecanvas_workspaces') AS workspaces, to_regclass('public.hosted_tenant_memberships') AS memberships, to_regclass('public.hosted_team_membership_audit') AS audits"
+    : "SELECT to_regclass('rulecanvas_workspaces') AS workspaces, to_regclass('public.hosted_tenant_memberships') AS memberships";
+  const { rows: [schema] } = await pool.query(schemaQuery);
+  if (!schema?.workspaces || !schema?.memberships || (teamManagement && !schema?.audits)) throw new Error('Hosted schema migrations are required.');
   const membership = createHostedMembership({
     pool,
     storeForTenant: (tenantId, actor) => new JsonStore(null, createPostgresWorkspaceBackend({ pool, tenantId }), { actor }),
   });
+  const team = teamManagement ? createHostedTeam({ pool }) : undefined;
   const checkReadiness = async () => { await pool.query({ text: 'SELECT 1', query_timeout: 2000 }); };
-  const server = createRuleCanvasServer({ hosted: { assertion, storageType: 'postgres', checkReadiness, ...membership } });
+  const server = createRuleCanvasServer({ hosted: { assertion, storageType: 'postgres', checkReadiness, ...membership, ...(team ? { team } : {}) } });
   startupStage = 'listener';
   await new Promise((resolve, reject) => {
     server.once('error', reject);

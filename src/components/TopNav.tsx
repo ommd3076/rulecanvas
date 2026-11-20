@@ -27,6 +27,7 @@ interface TopNavProps {
   canRedo?: boolean;
   onNavigateDashboard: () => void;
   onNavigateHome?: () => void;
+  onOpenTeam?: () => void;
   onNavigateProject: () => void;
   onOpenReleases?: () => void;
   onOpenActivity: () => void;
@@ -52,6 +53,7 @@ export const TopNav: React.FC<TopNavProps> = ({
   canRedo = false,
   onNavigateDashboard,
   onNavigateHome,
+  onOpenTeam,
   onNavigateProject,
   onOpenReleases,
   onOpenActivity,
@@ -94,6 +96,8 @@ export const TopNav: React.FC<TopNavProps> = ({
           <BreadcrumbDropdown items={breadcrumbItems} maxVisible={3} className="text-body-medium" />
         </div>
       </div>
+
+      {onOpenTeam && <Button variant="secondary" size="small" onClick={onOpenTeam}>Team settings</Button>}
 
       {view === 'editor' && (
         <div className="flex shrink-0 items-center gap-1 sm:gap-2">

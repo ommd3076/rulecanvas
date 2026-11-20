@@ -8,6 +8,8 @@ import { activateRelease, approveRelease, createReleasePolicyState, getDeploymen
 const STORE_SCHEMA_VERSION = 1;
 const GUIDED_EXAMPLE_KEY = 'eligibility-v1';
 const MAX_EVALUATION_RUNS_PER_PROJECT = 500;
+const MAX_SCENARIOS_PER_RULE = 100;
+const MAX_SCENARIO_INPUT_BYTES = 32 * 1024;
 const releaseTransitions = new Map([
   ['propose', proposeRelease],
   ['approve', approveRelease],
@@ -32,6 +34,25 @@ function addAuditEvent(data, actor, { projectId, rulesetId = null, type, details
   });
 }
 
+function normalizeScenarioDraft(draft) {
+  const name = typeof draft?.name === 'string' ? draft.name.trim() : '';
+  const description = typeof draft?.description === 'string' ? draft.description.trim() : '';
+  const { inputs, expectedOutcomeId = null } = draft ?? {};
+  if (!name || name.length > 100) throw new StoreError('Enter a scenario name between 1 and 100 characters.', 422, 'scenario.name');
+  if ((draft.description !== undefined && typeof draft.description !== 'string') || description.length > 300) {
+    throw new StoreError('The description must be text of at most 300 characters.', 422, 'scenario.description');
+  }
+  if (!inputs || typeof inputs !== 'object' || Array.isArray(inputs) ||
+      Object.values(inputs).some((value) => value !== null && typeof value !== 'string' && typeof value !== 'boolean' && !Number.isFinite(value)) ||
+      Buffer.byteLength(JSON.stringify(inputs), 'utf8') > MAX_SCENARIO_INPUT_BYTES) {
+    throw new StoreError('Use a JSON object with typed input values up to 32 KB.', 422, 'scenario.inputs');
+  }
+  if (expectedOutcomeId !== null && typeof expectedOutcomeId !== 'string') {
+    throw new StoreError('Choose an outcome from this rule or leave it blank.', 422, 'scenario.outcome');
+  }
+  return { name, description, inputs, expectedOutcomeId };
+}
+
 function assertVersionIntegrity(version) {
   const actualHash = createHash('sha256').update(JSON.stringify(version.graph)).digest('hex');
   if (actualHash !== version.graphHash) {
@@ -50,7 +71,7 @@ function parseStoreContents(contents) {
   if (!Number.isInteger(sourceVersion) || sourceVersion < 0 || sourceVersion > STORE_SCHEMA_VERSION) {
     throw new StoreError(`Local workspace schema version ${String(sourceVersion)} is not supported. The file was left untouched.`, 503, 'storage.version');
   }
-  const keys = ['projects', 'rulesets', 'versions', 'auditEvents', 'evaluationRuns', 'releasePolicies'];
+  const keys = ['projects', 'rulesets', 'versions', 'auditEvents', 'evaluationRuns', 'releasePolicies', 'testScenarios'];
   const requiredKeys = sourceVersion === 0 ? ['projects', 'rulesets'] : ['projects', 'rulesets', 'versions', 'auditEvents'];
   for (const key of keys) {
     if (requiredKeys.includes(key) ? !Array.isArray(stored[key]) : stored[key] !== undefined && !Array.isArray(stored[key])) {
@@ -65,12 +86,13 @@ function parseStoreContents(contents) {
     auditEvents: stored.auditEvents ?? [],
     evaluationRuns: stored.evaluationRuns ?? [],
     releasePolicies: stored.releasePolicies ?? [],
+    testScenarios: stored.testScenarios ?? [],
   };
 }
 
 function parseWorkspace(contents) {
   if (contents !== null) return parseStoreContents(contents);
-  return { schemaVersion: STORE_SCHEMA_VERSION, projects: [], rulesets: [], versions: [], auditEvents: [], evaluationRuns: [], releasePolicies: [] };
+  return { schemaVersion: STORE_SCHEMA_VERSION, projects: [], rulesets: [], versions: [], auditEvents: [], evaluationRuns: [], releasePolicies: [], testScenarios: [] };
 }
 
 function slugify(value) {
@@ -515,5 +537,42 @@ export class JsonStore {
       .sort((a, b) => b.run.createdAt.localeCompare(a.run.createdAt) || b.index - a.index)
       .slice(0, MAX_EVALUATION_RUNS_PER_PROJECT)
       .map(({ run }) => run);
+  }
+
+  async listTestScenarios(rulesetId) {
+    const data = await this.#read();
+    if (!data.rulesets.some((rule) => rule.id === rulesetId)) throw new StoreError('Ruleset not found.', 404, 'ruleset.not_found');
+    return data.testScenarios.filter((item) => item.rulesetId === rulesetId);
+  }
+
+  async createTestScenario(rulesetId, draft) {
+    const scenario = normalizeScenarioDraft(draft);
+    return this.#transact((data) => {
+      const rule = data.rulesets.find((item) => item.id === rulesetId);
+      if (!rule) throw new StoreError('Ruleset not found.', 404, 'ruleset.not_found');
+      if (scenario.expectedOutcomeId !== null && !rule.graph.nodes.some((node) => node.type === 'outcome' && node.id === scenario.expectedOutcomeId)) {
+        throw new StoreError('The expected outcome is no longer in this rule.', 422, 'scenario.outcome');
+      }
+      const existing = data.testScenarios.filter((item) => item.rulesetId === rulesetId);
+      if (existing.some((item) => item.name.toLowerCase() === scenario.name.toLowerCase())) {
+        throw new StoreError('A scenario with this name already exists in the rule.', 409, 'scenario.name_conflict');
+      }
+      if (existing.length >= MAX_SCENARIOS_PER_RULE) throw new StoreError('This rule has 100 saved scenarios. Remove one before adding another.', 409, 'scenario.limit');
+      const saved = { id: randomUUID(), rulesetId, ...scenario, createdAt: new Date().toISOString() };
+      data.testScenarios.push(saved);
+      addAuditEvent(data, this.#actor, { projectId: rule.projectId, rulesetId, type: 'test.scenario.created', details: { scenarioId: saved.id, name: saved.name } });
+      return saved;
+    });
+  }
+
+  async deleteTestScenario(rulesetId, scenarioId) {
+    return this.#transact((data) => {
+      const rule = data.rulesets.find((item) => item.id === rulesetId);
+      if (!rule) throw new StoreError('Ruleset not found.', 404, 'ruleset.not_found');
+      const index = data.testScenarios.findIndex((item) => item.rulesetId === rulesetId && item.id === scenarioId);
+      if (index === -1) throw new StoreError('Saved scenario not found.', 404, 'scenario.not_found');
+      const [removed] = data.testScenarios.splice(index, 1);
+      addAuditEvent(data, this.#actor, { projectId: rule.projectId, rulesetId, type: 'test.scenario.deleted', details: { scenarioId: removed.id, name: removed.name } });
+    });
   }
 }

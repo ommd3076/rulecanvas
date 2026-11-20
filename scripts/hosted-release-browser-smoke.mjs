@@ -192,6 +192,111 @@ async function switchIdentity(client, subject, secret) {
   await client.waitFor(`document.body.textContent.includes('Your roles:') && !document.body.textContent.includes('Your roles: loading')`, `${subject} role report`);
 }
 
+async function setIdentity(client, subject, secret) {
+  await client.send('Network.setExtraHTTPHeaders', {
+    headers: { [ASSERTION_HEADER]: signIdentity(subject, secret) },
+  });
+}
+
+async function setCheckbox(client, scopeExpression, label, selected) {
+  const changed = await client.evaluate(`(() => {
+    const scope = (${scopeExpression});
+    if (!scope) return false;
+    const checkbox = Array.from(scope.querySelectorAll('label'))
+      .find((item) => item.textContent.trim() === ${JSON.stringify(label)} && item.querySelector('input[type="checkbox"]'));
+    if (!checkbox) return false;
+    const checked = checkbox.querySelector('input[type="checkbox"]').checked;
+    if (checked !== ${JSON.stringify(selected)}) checkbox.querySelector('input[type="checkbox"]').click();
+    return true;
+  })()`);
+  assert(changed, `Could not set ${label} checkbox to ${selected}.`);
+  await client.waitFor(`(() => {
+    const scope = (${scopeExpression});
+    const checkbox = scope && Array.from(scope.querySelectorAll('label'))
+      .find((item) => item.textContent.trim() === ${JSON.stringify(label)} && item.querySelector('input[type="checkbox"]'));
+    return Boolean(checkbox && checkbox.querySelector('input[type="checkbox"]').checked === ${JSON.stringify(selected)});
+  })()`, `${label} checkbox state`);
+}
+
+async function runTeamSettingsBrowserSteps(client, hostedBase, secret) {
+  const addedSubject = `smoke-team-member-${randomBytes(5).toString('hex')}`;
+
+  await setIdentity(client, 'smoke-admin', secret);
+  await client.send('Page.navigate', { url: `${hostedBase}/projects` });
+  await client.waitFor(`document.querySelector('main h1')?.textContent.trim() === 'Your decision workspace'`, 'admin projects page').catch(async (error) => {
+    const state = await client.evaluate(`(() => ({
+      path: location.pathname,
+      headings: Array.from(document.querySelectorAll('h1, h2')).map((heading) => heading.textContent.trim()),
+      body: document.body.innerText.slice(0, 800),
+      buttons: Array.from(document.querySelectorAll('button')).map((button) => button.textContent.trim()).filter(Boolean).slice(0, 12),
+    }))()`);
+    throw new Error(`${error.message}; current page: ${JSON.stringify(state)}`);
+  });
+  await client.waitFor(`Array.from(document.querySelectorAll('button')).some((button) => button.textContent.trim() === 'Team settings')`, 'admin Team settings navigation');
+  assert(await client.evaluate(buttonClickExpression('Team settings')), 'Admin could not open Team settings.');
+  await client.waitFor(`location.pathname === '/projects/team' && document.querySelector('h1')?.textContent.trim() === 'Team access'`, 'admin Team access view');
+  await client.waitFor(`Boolean(document.querySelector('ul[aria-label="Team memberships"]'))`, 'loaded team membership list').catch(async (error) => {
+    const state = await client.evaluate(`(async () => ({
+      pageText: document.body.innerText.slice(-1200),
+      alerts: Array.from(document.querySelectorAll('[role="alert"]')).map((item) => item.textContent.trim()),
+      api: await fetch('/api/team/members').then(async (response) => ({ status: response.status, body: await response.json() })),
+    }))()`);
+    throw new Error(`${error.message}; current Team settings state: ${JSON.stringify(state)}`);
+  });
+
+  const addSubjectInput = await client.evaluate(`document.querySelector('input[placeholder="Exact SSO subject identifier"]') !== null`);
+  assert(addSubjectInput, 'Identity subject input was not available.');
+  await client.evaluate(`document.querySelector('input[placeholder="Exact SSO subject identifier"]').focus()`);
+  await client.send('Input.insertText', { text: addedSubject });
+  await setCheckbox(client, `document.querySelector('form')`, 'Author', false);
+  await setCheckbox(client, `document.querySelector('form')`, 'Reviewer', true);
+  assert(await client.evaluate(buttonClickExpression('Add identity')), 'Admin could not add a team identity.');
+  await client.waitFor(`document.body.textContent.includes('Identity added.')`, 'team identity add notice');
+  await client.waitFor(`Array.from(document.querySelectorAll('ul[aria-label="Team memberships"] li p[dir="ltr"]')).some((item) => item.textContent.trim() === ${JSON.stringify(addedSubject)})`, 'new team identity row');
+
+  const memberScope = `Array.from(document.querySelectorAll('ul[aria-label="Team memberships"] li'))
+    .find((row) => Array.from(row.querySelectorAll('p[dir="ltr"]')).some((item) => item.textContent.trim() === ${JSON.stringify(addedSubject)}))`;
+  await setCheckbox(client, memberScope, 'Reviewer', false);
+  await setCheckbox(client, memberScope, 'Deployer', true);
+  await setCheckbox(client, memberScope, 'Access enabled', false);
+  await client.waitFor(`(() => {
+    const row = (${memberScope});
+    return Boolean(row && Array.from(row.querySelectorAll('button')).some((button) => button.textContent.trim() === 'Save changes' && !button.disabled));
+  })()`, 'enabled membership save action');
+  const saveRow = await client.evaluate(`(() => {
+    const row = (${memberScope});
+    const button = row && Array.from(row.querySelectorAll('button')).find((item) => item.textContent.trim() === 'Save changes' && !item.disabled);
+    button?.click();
+    return Boolean(button);
+  })()`);
+  assert(saveRow, 'Admin could not save the role and access status changes.');
+  await client.waitFor(`document.body.textContent.includes('Membership saved.')`, 'membership update notice');
+  await client.waitFor(`(() => {
+    const row = (${memberScope});
+    return Boolean(row?.textContent.includes('Access disabled'));
+  })()`, 'saved member status');
+
+  const savedMembers = await client.evaluate(`fetch('/api/team/members').then(async (response) => ({ status: response.status, body: await response.json() }))`);
+  assert.equal(savedMembers.status, 200, 'Admin could not read team membership state after saving.');
+  const savedMember = savedMembers.body.members.find((member) => member.subject === addedSubject);
+  assert.deepEqual(savedMember?.roles, ['deployer']);
+  assert.equal(savedMember?.enabled, false);
+  console.log('✓ Admin navigated Team settings, added an identity, and saved its role/status');
+
+  await setIdentity(client, 'smoke-author', secret);
+  await client.send('Page.navigate', { url: `${hostedBase}/projects` });
+  await client.waitFor(`document.querySelector('main h1')?.textContent.trim() === 'Your decision workspace'`, 'non-admin projects page');
+  const nonAdminNavigation = await client.evaluate(`Array.from(document.querySelectorAll('button')).some((button) => button.textContent.trim() === 'Team settings')`);
+  assert.equal(nonAdminNavigation, false, 'Non-admin identity must not see Team settings navigation.');
+
+  await client.send('Page.navigate', { url: `${hostedBase}/projects/team` });
+  await client.waitFor(`document.querySelector('h1')?.textContent.trim() === 'Team settings unavailable'`, 'non-admin unavailable view');
+  assert.equal(await client.evaluate(`!!document.querySelector('h2#add-member-heading')`), false, 'Non-admin route must not mount the team management form.');
+  const nonAdminApiStatus = await client.evaluate(`fetch('/api/team/members').then((response) => response.status)`);
+  assert.equal(nonAdminApiStatus, 403, 'Team API must deny non-admin membership reads.');
+  console.log('✓ Non-admin cannot see Team settings navigation, manage the direct route, or read membership API');
+}
+
 async function run() {
   await fs.mkdir(path.resolve('reports'), { recursive: true });
   const workspace = await fs.mkdtemp(path.resolve('reports', 'temp-release-browser-'));
@@ -203,17 +308,89 @@ async function run() {
 
   const secret = randomBytes(32);
   const rolesBySubject = new Map([
+    ['smoke-admin', ['admin']],
     ['smoke-author', ['author']],
     ['smoke-reviewer', ['reviewer']],
     ['smoke-deployer', ['deployer']],
   ]);
+  const teamMembers = new Map([
+    ['smoke-admin', { subject: 'smoke-admin', roles: ['admin'], enabled: true }],
+    ['smoke-author', { subject: 'smoke-author', roles: ['author'], enabled: true }],
+    ['smoke-reviewer', { subject: 'smoke-reviewer', roles: ['reviewer'], enabled: true }],
+    ['smoke-deployer', { subject: 'smoke-deployer', roles: ['deployer'], enabled: true }],
+  ]);
+  const requireTeamAdmin = (principal) => {
+    if (!rolesBySubject.get(principal?.subject)?.includes('admin')) {
+      const error = new Error('Hosted team administration is restricted to an enabled administrator.');
+      error.name = 'HostedTeamError';
+      error.code = 'auth.denied';
+      error.status = 403;
+      throw error;
+    }
+  };
   const hostedStore = new JsonStore(hostedFile);
   const localServer = createRuleCanvasServer({ store: new JsonStore(localFile) });
   const hostedServer = createRuleCanvasServer({
     hosted: {
       assertion: { secret, issuer: ISSUER, audience: AUDIENCE },
-      resolveAuthorizedStore: ({ principal }) => rolesBySubject.has(principal.subject) ? hostedStore : null,
+      resolveAuthorizedStore: ({ principal, pathname }) => {
+        if (!rolesBySubject.has(principal.subject)) return null;
+        if (pathname === '/api/team/members' && !rolesBySubject.get(principal.subject)?.includes('admin')) return null;
+        return hostedStore;
+      },
       resolveReleaseRoles: ({ principal }) => rolesBySubject.get(principal.subject),
+      isAdmin: async (principal) => rolesBySubject.get(principal?.subject)?.includes('admin') === true,
+      team: {
+        async listMembers(principal) {
+          requireTeamAdmin(principal);
+          return [...teamMembers.values()].map((member) => structuredClone(member)).sort((a, b) => a.subject.localeCompare(b.subject));
+        },
+        async addMember(principal, body = {}) {
+          requireTeamAdmin(principal);
+          if (teamMembers.has(body.subject)) {
+            const error = new Error('Team identity already exists.');
+            error.name = 'HostedTeamError';
+            error.code = 'team.member_exists';
+            error.status = 409;
+            throw error;
+          }
+          const member = {
+            subject: body.subject,
+            roles: [...(body.roles ?? [])].sort(),
+            enabled: body.enabled ?? true,
+          };
+          teamMembers.set(member.subject, member);
+          return structuredClone(member);
+        },
+        async updateMember(principal, body = {}) {
+          requireTeamAdmin(principal);
+          const current = teamMembers.get(body.subject);
+          if (!current) {
+            const error = new Error('Team identity was not found.');
+            error.name = 'HostedTeamError';
+            error.code = 'team.member_not_found';
+            error.status = 404;
+            throw error;
+          }
+          const currentRoles = [...current.roles].sort();
+          const expectedRoles = [...(body.expected?.roles ?? [])].sort();
+          if (current.enabled !== body.expected?.enabled || currentRoles.length !== expectedRoles.length ||
+              currentRoles.some((role, index) => role !== expectedRoles[index])) {
+            const error = new Error('Team identity changed elsewhere.');
+            error.name = 'HostedTeamError';
+            error.code = 'team.member_conflict';
+            error.status = 409;
+            throw error;
+          }
+          const member = {
+            ...current,
+            ...(body.roles ? { roles: [...body.roles].sort() } : {}),
+            ...(body.enabled === undefined ? {} : { enabled: body.enabled }),
+          };
+          teamMembers.set(member.subject, member);
+          return structuredClone(member);
+        },
+      },
     },
   });
   let edge;
@@ -387,7 +564,10 @@ async function run() {
     assert(rolledBackState.body.policy.auditTrail.some((entry) => entry.action === 'approve' && entry.actorId === 'smoke-reviewer' && entry.actorRoles.includes('reviewer')));
     assert(rolledBackState.body.policy.auditTrail.some((entry) => entry.action === 'propose' && entry.actorId === 'smoke-author' && entry.actorRoles.includes('author')));
     console.log('✓ Approve, activate, rollback, and trusted reporter roles verified through the hosted UI');
+
+    await runTeamSettingsBrowserSteps(client, hostedBase, secret);
     console.log('HOSTED RELEASE BROWSER ACCEPTANCE PASSED');
+    console.log('HOSTED TEAM SETTINGS BROWSER ACCEPTANCE PASSED');
   } finally {
     client?.close();
     if (edge?.pid && edge.exitCode === null && edge.signalCode === null) {

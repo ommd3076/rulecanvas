@@ -13,7 +13,7 @@ const databaseUrl = process.env.RULECANVAS_TEST_DATABASE_URL;
 const issuer = 'rulecanvas-startup-test';
 const audience = 'rulecanvas';
 
-async function startHosted(secret, databaseUrl, t) {
+async function startHosted(secret, databaseUrl, t, { enableTeam = false } = {}) {
   const reservation = createServer().listen(0, '127.0.0.1');
   await once(reservation, 'listening');
   const { port } = reservation.address();
@@ -27,6 +27,7 @@ async function startHosted(secret, databaseUrl, t) {
       RULECANVAS_ASSERTION_ISSUER: issuer,
       RULECANVAS_ASSERTION_AUDIENCE: audience,
       RULECANVAS_ASSERTION_SECRET: secret.toString('base64url'),
+      RULECANVAS_TEAM_MANAGEMENT: enableTeam ? '1' : '',
     },
     stdio: ['ignore', 'ignore', 'pipe'],
   });
@@ -289,6 +290,89 @@ test('hosted launcher enforces role-scoped releases, immutable runtime evaluatio
       if (migrated) {
         await pool.query('DELETE FROM public.hosted_tenant_memberships WHERE tenant_id = ANY($1::varchar[])', [[tenant, otherTenant]]);
         await pool.query('DELETE FROM rulecanvas_workspaces WHERE tenant_id = ANY($1::varchar[])', [[tenant, otherTenant]]);
+      }
+    } finally {
+      await pool.end();
+    }
+  }
+});
+
+test('hosted team changes take effect immediately and persist with an atomic PostgreSQL audit trail', {
+  skip: databaseUrl ? false : 'RULECANVAS_TEST_DATABASE_URL is not set.',
+  timeout: 30_000,
+}, async (t) => {
+  const pool = new pg.Pool({ connectionString: databaseUrl, connectionTimeoutMillis: 5000 });
+  const tenant = `team-${randomUUID()}`;
+  const otherTenant = `team-${randomUUID()}`;
+  const secret = randomBytes(32);
+  let migrated = false;
+  try {
+    await preparePostgresTestSchema(pool);
+    migrated = true;
+    await pool.query(`INSERT INTO public.hosted_tenant_memberships (tenant_id, issuer, subject, roles)
+      VALUES ($1,$3,'admin-one',ARRAY['admin']), ($1,$3,'author-one',ARRAY['author']),
+             ($2,$3,'admin-two',ARRAY['admin'])`, [tenant, otherTenant, issuer]);
+
+    const first = await startHosted(secret, databaseUrl, t, { enableTeam: true });
+    const teamPath = '/api/team/members';
+    const send = (server, path, subject, { method = 'GET', body, tenantId = tenant, credential } = {}) => fetch(`${server.url}${path}`, {
+      method,
+      headers: {
+        ...(subject ? { 'x-rulecanvas-assertion': credential ?? assertion(secret, tenantId, subject) } : {}),
+        ...(body ? { 'content-type': 'application/json' } : {}),
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+      signal: AbortSignal.timeout(5000),
+    });
+
+    const health = await send(first, '/api/health', 'admin-one');
+    assert.equal((await health.json()).teamManagement, true);
+    const authorHealth = await send(first, '/api/health', 'author-one');
+    assert.notEqual((await authorHealth.json()).teamManagement, true);
+    assert.equal((await send(first, teamPath)).status, 401);
+    assert.equal((await send(first, teamPath, 'author-one')).status, 403);
+
+    const created = await send(first, teamPath, 'admin-one', {
+      method: 'POST', body: { subject: 'synthetic-runner', roles: ['runner'], tenantId: otherTenant },
+    });
+    assert.equal(created.status, 201);
+    const { member } = await created.json();
+    assert.deepEqual(member, { subject: 'synthetic-runner', roles: ['runner'], enabled: true });
+    const otherList = await send(first, teamPath, 'admin-two', { tenantId: otherTenant });
+    assert.deepEqual((await otherList.json()).members.map((entry) => entry.subject), ['admin-two']);
+
+    const credential = assertion(secret, tenant, member.subject);
+    assert.equal((await send(first, '/api/projects', member.subject, { credential })).status, 200);
+    const disabled = await send(first, teamPath, 'admin-one', {
+      method: 'PATCH', body: { subject: member.subject, expected: { roles: member.roles, enabled: true }, enabled: false },
+    });
+    assert.equal(disabled.status, 200);
+    assert.equal((await disabled.json()).member.enabled, false);
+    assert.equal((await send(first, '/api/projects', member.subject, { credential })).status, 403);
+
+    const stale = await send(first, teamPath, 'admin-one', {
+      method: 'PATCH', body: { subject: member.subject, expected: { roles: member.roles, enabled: true }, roles: ['reviewer'] },
+    });
+    assert.equal(stale.status, 409);
+    assert.equal((await stale.json()).error.code, 'team.member_conflict');
+    await first.stop();
+
+    const second = await startHosted(secret, databaseUrl, t, { enableTeam: true });
+    const listed = await send(second, teamPath, 'admin-one');
+    assert.equal(listed.status, 200);
+    assert.deepEqual((await listed.json()).members.find((entry) => entry.subject === member.subject), { ...member, enabled: false });
+    const { rows } = await pool.query(`SELECT action, actor_subject, target_subject, before_roles, before_enabled, after_roles, after_enabled
+      FROM public.hosted_team_membership_audit WHERE tenant_id = $1 AND issuer = $2 ORDER BY id`, [tenant, issuer]);
+    assert.deepEqual(rows, [
+      { action: 'member.created', actor_subject: 'admin-one', target_subject: member.subject, before_roles: null, before_enabled: null, after_roles: ['runner'], after_enabled: true },
+      { action: 'member.updated', actor_subject: 'admin-one', target_subject: member.subject, before_roles: ['runner'], before_enabled: true, after_roles: ['runner'], after_enabled: false },
+    ]);
+    await second.stop();
+  } finally {
+    try {
+      if (migrated) {
+        await pool.query('DELETE FROM public.hosted_team_membership_audit WHERE tenant_id = $1', [tenant]);
+        await pool.query('DELETE FROM public.hosted_tenant_memberships WHERE tenant_id = ANY($1::varchar[])', [[tenant, otherTenant]]);
       }
     } finally {
       await pool.end();

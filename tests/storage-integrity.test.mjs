@@ -30,6 +30,40 @@ test('uses the transactional workspace backend and preserves immutable graph has
   assert.equal(contents, checkpoint);
 });
 
+test('reopens rule-scoped test scenarios and keeps their inputs out of project activity', async () => {
+  let contents = null;
+  const backend = {
+    read: async () => contents,
+    transact: async (change) => {
+      const result = await change(contents);
+      contents = result.contents;
+      return result.value;
+    },
+  };
+  const store = new JsonStore(null, backend, { actor: 'fixture-author' });
+  const project = await store.createProject('Saved test workspace');
+  const rule = await store.createRuleset(project.id, 'Decision');
+  const other = await store.createRuleset(project.id, 'Other');
+  await store.saveRuleset(rule.id, rule.revision, validGraph(), rule.name);
+  const draft = { name: 'Boundary', inputs: { score: 8, tier: 'synthetic-sensitive-input' }, expectedOutcomeId: 'eligible' };
+  const saved = await store.createTestScenario(rule.id, draft);
+  await assert.rejects(store.createTestScenario(rule.id, { ...draft, name: 'boundary' }), { code: 'scenario.name_conflict' });
+  await assert.rejects(store.createTestScenario(rule.id, { ...draft, inputs: { score: [] } }), { code: 'scenario.inputs' });
+  await assert.rejects(store.createTestScenario(other.id, draft), { code: 'scenario.outcome' });
+
+  const reopened = new JsonStore(null, backend, { actor: 'fixture-admin' });
+  assert.deepEqual(await reopened.listTestScenarios(rule.id), [saved]);
+  assert.deepEqual(await reopened.listTestScenarios(other.id), []);
+  await assert.rejects(reopened.deleteTestScenario(other.id, saved.id), { code: 'scenario.not_found' });
+  await reopened.deleteTestScenario(rule.id, saved.id);
+  assert.deepEqual(await store.listTestScenarios(rule.id), []);
+  const events = await store.listAuditEvents(project.id, rule.id);
+  assert.equal(events.find((event) => event.type === 'test.scenario.created').actor, 'fixture-author');
+  assert.equal(events.find((event) => event.type === 'test.scenario.deleted').actor, 'fixture-admin');
+  assert(!JSON.stringify(events).includes(draft.inputs.tier));
+  assert.equal((await store.getRuleset(rule.id)).revision, rule.revision + 1);
+});
+
 test('version reads reject graph data changed without updating its content hash', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'rulecanvas-integrity-'));
   const file = join(directory, 'store.json');

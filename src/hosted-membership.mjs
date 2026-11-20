@@ -21,6 +21,9 @@ function routePolicy(method, pathname) {
   if (method === 'GET' && pathname === '/api/health') return 'member';
   if (pathname === '/api/projects') return method === 'GET' ? 'member' : method === 'POST' ? 'write' : null;
   if (method === 'POST' && pathname === '/api/examples/eligibility') return 'write';
+  if (pathname === '/api/team/members') {
+    return (method === 'GET' || method === 'POST' || method === 'PATCH') ? 'admin' : null;
+  }
 
   let match = pathname.match(new RegExp(`^/api/projects/${ID}$`, 'i'));
   if (match) return method === 'GET' ? 'member' : null;
@@ -35,6 +38,10 @@ function routePolicy(method, pathname) {
   if (match) return method === 'GET' ? 'member' : method === 'PUT' ? 'write' : null;
   match = pathname.match(new RegExp(`^/api/rulesets/${ID}/versions$`, 'i'));
   if (match) return method === 'GET' ? 'member' : method === 'POST' ? 'write' : null;
+  match = pathname.match(new RegExp(`^/api/rulesets/${ID}/scenarios$`, 'i'));
+  if (match) return method === 'GET' ? 'evaluate' : method === 'POST' ? 'write' : null;
+  match = pathname.match(new RegExp(`^/api/rulesets/${ID}/scenarios/${ID}$`, 'i'));
+  if (match) return method === 'DELETE' ? 'write' : null;
   match = pathname.match(new RegExp(`^/api/rulesets/${ID}/versions/${ID}$`, 'i'));
   if (match) return method === 'GET' ? 'member' : null;
   match = pathname.match(new RegExp(`^/api/rulesets/${ID}/versions/${ID}/evaluate$`, 'i'));
@@ -103,5 +110,14 @@ export function createHostedMembership({ pool, storeForTenant } = {}) {
     return membership.roles;
   }
 
-  return Object.freeze({ resolveAuthorizedStore, resolveReleaseRoles });
+  async function isAdmin(principal) {
+    try {
+      const membership = await lookupMembership(principal);
+      return membership.roles.includes('admin');
+    } catch {
+      return false;
+    }
+  }
+
+  return Object.freeze({ resolveAuthorizedStore, resolveReleaseRoles, lookupMembership, isAdmin });
 }

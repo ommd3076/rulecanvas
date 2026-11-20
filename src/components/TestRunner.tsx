@@ -1,11 +1,13 @@
-import React, { useRef, useState } from 'react';
-import type { SchemaField, EvaluationResult, EvaluationTraceEntry } from '@/src/api';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { SchemaField, EvaluationResult, EvaluationTraceEntry, TestScenario } from '@/src/api';
+import { api } from '@/src/api';
 import { toast } from 'sonner';
 import { Input } from '@/components/base/input/input';
 import { Select, SelectItem } from '@/components/base/select/select';
 import { NumberField } from '@/components/base/number-field/number-field';
 import { Chip } from '@/components/base/badges/chip';
 import { Button } from '@/components/base/buttons/button';
+import { AlertDialog } from '@/components/base/modal/modal';
 import { Accordion, AccordionItem } from '@/components/base/accordion/accordion';
 import {
   RiCheckLine,
@@ -13,6 +15,8 @@ import {
   RiSparklingLine,
   RiDeleteBinLine,
   RiInformationLine,
+  RiSaveLine,
+  RiFolderOpenLine,
 } from '@remixicon/react';
 import ProgressButton from '@/components/ruixen/progress-button';
 import StepPlayer, { type StepPlayerStep } from '@/components/rareui/step-player';
@@ -24,6 +28,32 @@ interface TestRunnerProps {
   onHighlightNode?: (nodeId: string | null) => void;
   initialInputValues?: Record<string, any>;
   guideText?: string;
+  scenarioRulesetId?: string;
+  scenarioOutcomes?: Array<{ id: string; label: string }>;
+  onBeforeCreateScenario?: () => Promise<unknown>;
+}
+
+function buildCleanPayload(schema: SchemaField[], inputValues: Record<string, any>) {
+  const cleanPayload: Record<string, any> = {};
+  for (const field of schema) {
+    const hasExplicitKey = Object.hasOwn(inputValues, field.name);
+    const rawVal = hasExplicitKey ? inputValues[field.name] : undefined;
+    if (rawVal !== undefined && rawVal !== null) {
+      if (shouldIncludeTypedValue(field, rawVal)) {
+        if (field.type === 'number') {
+          const parsed = Number(rawVal);
+          if (!isNaN(parsed)) cleanPayload[field.name] = parsed;
+        } else if (field.type === 'boolean') {
+          cleanPayload[field.name] = rawVal === true || rawVal === 'true';
+        } else {
+          cleanPayload[field.name] = rawVal;
+        }
+      }
+    } else if (field.type === 'string' && shouldIncludeTypedValue(field, '')) {
+      cleanPayload[field.name] = '';
+    }
+  }
+  return cleanPayload;
 }
 
 /**
@@ -153,17 +183,72 @@ export const TestRunner: React.FC<TestRunnerProps> = ({
   onHighlightNode,
   initialInputValues,
   guideText,
+  scenarioRulesetId,
+  scenarioOutcomes = [],
+  onBeforeCreateScenario,
 }) => {
   const [inputValues, setInputValues] = useState<Record<string, any>>(() => initialInputValues || {});
   const [evaluation, setEvaluation] = useState<EvaluationResult | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
+  const [scenarios, setScenarios] = useState<TestScenario[]>([]);
+  const [scenariosCanEdit, setScenariosCanEdit] = useState(false);
+  const [scenariosLoading, setScenariosLoading] = useState(false);
+  const [scenariosError, setScenariosError] = useState('');
+  const [scenarioName, setScenarioName] = useState('');
+  const [scenarioDescription, setScenarioDescription] = useState('');
+  const [scenarioExpectedOutcomeId, setScenarioExpectedOutcomeId] = useState('');
+  const [scenarioSaving, setScenarioSaving] = useState(false);
+  const [scenarioSaveError, setScenarioSaveError] = useState('');
+  const [scenarioDeleting, setScenarioDeleting] = useState(false);
+  const [deleteScenario, setDeleteScenario] = useState<TestScenario | null>(null);
+  const [loadedScenario, setLoadedScenario] = useState<TestScenario | null>(null);
   const evaluationRequestRef = useRef(0);
+  const scenarioRequestRef = useRef(0);
+  const inputGenerationRef = useRef(0);
+
+  const loadScenarios = useCallback(async () => {
+    if (!scenarioRulesetId) return;
+    const requestId = ++scenarioRequestRef.current;
+    setScenariosLoading(true);
+    setScenariosCanEdit(false);
+    setScenariosError('');
+    try {
+      const result = await api.listScenarios(scenarioRulesetId);
+      if (requestId !== scenarioRequestRef.current) return;
+      setScenarios(result.scenarios);
+      setScenariosCanEdit(result.canEdit);
+    } catch (error: any) {
+      if (requestId !== scenarioRequestRef.current) return;
+      if (error?.status === 401 || error?.status === 403) {
+        setScenarios([]);
+        setLoadedScenario(null);
+      }
+      setScenariosError(error?.message || 'Saved scenarios could not be loaded.');
+    } finally {
+      if (requestId === scenarioRequestRef.current) setScenariosLoading(false);
+    }
+  }, [scenarioRulesetId]);
+
+  useEffect(() => {
+    if (scenarioRulesetId) void loadScenarios();
+    else {
+      scenarioRequestRef.current += 1;
+      setScenarios([]);
+      setScenariosCanEdit(false);
+      setLoadedScenario(null);
+    }
+    return () => { scenarioRequestRef.current += 1; };
+  }, [scenarioRulesetId, loadScenarios]);
+
+  const outcomeLabel = useMemo(() => new Map(scenarioOutcomes.map(({ id, label }) => [id, label])), [scenarioOutcomes]);
 
   const handleInputChange = (fieldName: string, value: any) => {
+    inputGenerationRef.current += 1;
     evaluationRequestRef.current += 1;
     setEvaluation(null);
     setIsRunning(false);
+    setLoadedScenario(null);
     setInputValues((prev) => {
       const next = { ...prev };
       if (value === undefined || value === null) {
@@ -176,9 +261,11 @@ export const TestRunner: React.FC<TestRunnerProps> = ({
   };
 
   const handleFillSampleInputs = () => {
+    inputGenerationRef.current += 1;
     evaluationRequestRef.current += 1;
     setEvaluation(null);
     setIsRunning(false);
+    setLoadedScenario(null);
     const samples: Record<string, any> = {};
     for (const field of schema) {
       if (field.type === 'number') samples[field.name] = 100;
@@ -192,11 +279,80 @@ export const TestRunner: React.FC<TestRunnerProps> = ({
   };
 
   const handleClearInputs = () => {
+    inputGenerationRef.current += 1;
     evaluationRequestRef.current += 1;
     setEvaluation(null);
     setIsRunning(false);
     setInputValues({});
+    setLoadedScenario(null);
     toast.info('Inputs cleared.');
+  };
+
+  const handleLoadScenario = (scenario: TestScenario) => {
+    inputGenerationRef.current += 1;
+    evaluationRequestRef.current += 1;
+    setEvaluation(null);
+    setIsRunning(false);
+    setInputValues({ ...scenario.inputs });
+    setLoadedScenario(scenario);
+    setActiveStepIndex(0);
+    onHighlightNode?.(null);
+    toast.info(`Loaded scenario “${scenario.name}”.`);
+  };
+
+  const handleSaveScenario = async () => {
+    if (!scenarioRulesetId || !scenarioName.trim() || !scenariosCanEdit || scenarioSaving) return;
+    const inputGeneration = inputGenerationRef.current;
+    const inputs = buildCleanPayload(schema, inputValues);
+    setScenarioSaving(true);
+    setScenarioSaveError('');
+    try {
+      await onBeforeCreateScenario?.();
+      const result = await api.createScenario(scenarioRulesetId, {
+        name: scenarioName.trim(),
+        description: scenarioDescription.trim(),
+        inputs,
+        expectedOutcomeId: scenarioExpectedOutcomeId || null,
+      });
+      setScenarios((current) => [result.scenario, ...current.filter((item) => item.id !== result.scenario.id)]);
+      setScenarioName('');
+      setScenarioDescription('');
+      setScenarioExpectedOutcomeId('');
+      if (inputGenerationRef.current === inputGeneration) setLoadedScenario(result.scenario);
+      setScenariosError('');
+      toast.success('Test scenario saved.');
+    } catch (error: any) {
+      if (error?.status === 401 || error?.status === 403) {
+        setScenarios([]);
+        setScenariosCanEdit(false);
+        setLoadedScenario(null);
+      }
+      setScenarioSaveError(error?.message || 'Scenario could not be saved. Try again.');
+    } finally {
+      setScenarioSaving(false);
+    }
+  };
+
+  const handleConfirmDeleteScenario = async () => {
+    if (!scenarioRulesetId || !deleteScenario || !scenariosCanEdit || scenarioDeleting) return;
+    setScenarioDeleting(true);
+    try {
+      await api.deleteScenario(scenarioRulesetId, deleteScenario.id);
+      setScenarios((current) => current.filter((item) => item.id !== deleteScenario.id));
+      if (loadedScenario?.id === deleteScenario.id) setLoadedScenario(null);
+      setDeleteScenario(null);
+      toast.success('Test scenario deleted.');
+    } catch (error: any) {
+      if (error?.status === 401 || error?.status === 403) {
+        setScenarios([]);
+        setScenariosCanEdit(false);
+        setLoadedScenario(null);
+      }
+      setScenariosError(error?.message || 'Scenario could not be deleted. Try again.');
+      throw error;
+    } finally {
+      setScenarioDeleting(false);
+    }
   };
 
   const handleExecute = async () => {
@@ -204,33 +360,7 @@ export const TestRunner: React.FC<TestRunnerProps> = ({
     setEvaluation(null);
     setIsRunning(true);
     try {
-      // Build clean payload adhering strictly to tested shouldIncludeTypedValue semantics:
-      // Required strings with empty string are included; optional blanks are omitted
-      const cleanPayload: Record<string, any> = {};
-      for (const field of schema) {
-        const hasExplicitKey = Object.hasOwn(inputValues, field.name);
-        const rawVal = hasExplicitKey ? inputValues[field.name] : undefined;
-
-        if (rawVal !== undefined && rawVal !== null) {
-          if (shouldIncludeTypedValue(field, rawVal)) {
-            if (field.type === 'number') {
-              const parsed = Number(rawVal);
-              if (!isNaN(parsed)) {
-                cleanPayload[field.name] = parsed;
-              }
-            } else if (field.type === 'boolean') {
-              cleanPayload[field.name] = rawVal === true || rawVal === 'true';
-            } else {
-              cleanPayload[field.name] = rawVal;
-            }
-          }
-        } else {
-          // Field not touched: for required strings, tested behavior passes empty string
-          if (field.type === 'string' && shouldIncludeTypedValue(field, '')) {
-            cleanPayload[field.name] = '';
-          }
-        }
-      }
+      const cleanPayload = buildCleanPayload(schema, inputValues);
 
       const res = await onRunTest(cleanPayload);
       if (requestId !== evaluationRequestRef.current) return;
@@ -429,6 +559,106 @@ export const TestRunner: React.FC<TestRunnerProps> = ({
         </div>
       </div>
 
+      {scenarioRulesetId && (
+        <section data-testid="saved-scenarios-panel" aria-labelledby="saved-scenarios-heading" className="flex flex-col gap-4 rounded-2xl border border-border-button-default bg-background-primary-default p-4 shadow-xs">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h4 id="saved-scenarios-heading" className="text-body-medium font-semibold text-text-primary">Saved test scenarios</h4>
+              <p className="mt-1 text-body-2-regular text-text-secondary">Save and reuse typed test payloads for this rule set. Saved scenario inputs are stored with this rule set.</p>
+            </div>
+            <Button variant="secondary" size="small" leadingIcon={RiFolderOpenLine} onClick={() => void loadScenarios()} disabled={scenariosLoading}>
+              {scenariosLoading ? 'Refreshing…' : 'Refresh scenarios'}
+            </Button>
+          </div>
+
+          {scenariosLoading && scenarios.length === 0 && <p role="status" className="text-body-2-regular text-text-secondary">Loading saved scenarios…</p>}
+          {scenariosError && (
+            <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border-error-default p-3">
+              <p className="text-body-2-regular text-text-error-primary">{scenariosError}</p>
+              <Button variant="secondary" size="small" onClick={() => void loadScenarios()}>Try again</Button>
+            </div>
+          )}
+
+          {scenariosCanEdit && (
+            <div data-testid="saved-scenario-create-form" className="flex flex-col gap-3 rounded-xl bg-background-secondary-default p-4">
+              <h5 className="text-body-2-medium text-text-primary">Save current payload</h5>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Input
+                  label="Scenario name"
+                  value={scenarioName}
+                  onChange={setScenarioName}
+                  placeholder="e.g. Eligible applicant"
+                  maxLength={120}
+                  isRequired
+                />
+                <Input
+                  label="Description (optional)"
+                  value={scenarioDescription}
+                  onChange={setScenarioDescription}
+                  placeholder="What this scenario checks"
+                  maxLength={500}
+                />
+              </div>
+              {scenarioOutcomes.length > 0 && (
+                <Select
+                  aria-label="Expected outcome (optional)"
+                  placeholder="No expected outcome"
+                  selectedKey={scenarioExpectedOutcomeId}
+                  onSelectionChange={(key) => setScenarioExpectedOutcomeId(key ? String(key) : '')}
+                >
+                  <SelectItem id="">No expected outcome</SelectItem>
+                  {scenarioOutcomes.map((outcome) => <SelectItem key={outcome.id} id={outcome.id}>{outcome.label}</SelectItem>)}
+                </Select>
+              )}
+              {scenarioSaveError && <p role="alert" className="text-body-2-regular text-text-error-primary">{scenarioSaveError}</p>}
+              <div>
+                <Button
+                  variant="primary"
+                  size="small"
+                  leadingIcon={RiSaveLine}
+                  data-testid="save-scenario"
+                  onClick={() => void handleSaveScenario()}
+                  disabled={scenarioSaving || scenariosLoading || !scenarioName.trim()}
+                >
+                  {scenarioSaving ? 'Saving…' : 'Save scenario'}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {!scenariosLoading && scenarios.length === 0 && !scenariosError && (
+            <p className="rounded-xl border border-dashed border-border-button-default p-4 text-body-2-regular text-text-secondary">
+              {scenariosCanEdit ? 'No saved scenarios yet. Save the current payload above to make a reusable test.' : 'No saved scenarios are available for this rule set.'}
+            </p>
+          )}
+
+          {scenarios.length > 0 && (
+            <ul data-testid="saved-scenario-list" aria-label="Saved test scenarios" className="flex flex-col divide-y divide-separator-border">
+              {scenarios.map((scenario) => (
+                <li key={scenario.id} className="flex flex-col gap-3 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-body-2-medium text-text-primary">{scenario.name}</span>
+                      {loadedScenario?.id === scenario.id && <Chip variant="caption" color="blue">Loaded</Chip>}
+                    </div>
+                    {scenario.description && <p className="mt-1 text-caption-1-regular text-text-secondary">{scenario.description}</p>}
+                    <p className="mt-1 text-caption-2 text-text-tertiary">
+                      {Object.keys(scenario.inputs).length} input {Object.keys(scenario.inputs).length === 1 ? 'field' : 'fields'}
+                      {scenario.expectedOutcomeId ? ` · Expects ${outcomeLabel.get(scenario.expectedOutcomeId) || scenario.expectedOutcomeId}` : ' · No expected outcome'}
+                      {scenario.createdAt && ` · Saved ${new Date(scenario.createdAt).toLocaleDateString()}`}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Button variant="secondary" size="small" leadingIcon={RiFolderOpenLine} aria-label={`Load scenario ${scenario.name}`} onClick={() => handleLoadScenario(scenario)}>Load</Button>
+                    {scenariosCanEdit && <Button variant="danger" size="small" leadingIcon={RiDeleteBinLine} aria-label={`Delete scenario ${scenario.name}`} onClick={() => setDeleteScenario(scenario)}>Delete</Button>}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+
       {/* Evaluation Results */}
       {evaluation && (
         <div className="flex flex-col gap-4">
@@ -478,6 +708,42 @@ export const TestRunner: React.FC<TestRunnerProps> = ({
                   <li key={i}>{err.message}</li>
                 ))}
               </ul>
+            </div>
+          )}
+
+          {loadedScenario && (
+            <div
+              data-testid="scenario-outcome-comparison"
+              role="status"
+              className={`flex flex-col gap-2 rounded-2xl border p-4 ${
+                loadedScenario.expectedOutcomeId === null
+                  ? 'border-border-button-default bg-background-secondary-default'
+                  : !evaluation.ok
+                    ? 'border-border-button-default bg-background-secondary-default'
+                    : evaluation.outcomeId === loadedScenario.expectedOutcomeId
+                    ? 'border-status-lime-text/20 bg-status-lime-background/40'
+                    : 'border-status-rose-text/20 bg-status-rose-background/40'
+              }`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-body-medium font-semibold text-text-primary">Scenario: {loadedScenario.name}</span>
+                {loadedScenario.expectedOutcomeId === null ? (
+                  <Chip variant="caption" color="blue">No assertion</Chip>
+                ) : !evaluation.ok ? (
+                  <Chip variant="caption" color="yellow">Not evaluated</Chip>
+                ) : (
+                  <Chip variant="bold" color={evaluation.ok && evaluation.outcomeId === loadedScenario.expectedOutcomeId ? 'lime' : 'rose'}>
+                    {evaluation.ok && evaluation.outcomeId === loadedScenario.expectedOutcomeId ? 'PASS' : 'FAIL'}
+                  </Chip>
+                )}
+              </div>
+              <div className="grid gap-1 text-body-2-regular text-text-secondary sm:grid-cols-2">
+                <p>Expected outcome: {loadedScenario.expectedOutcomeId ? outcomeLabel.get(loadedScenario.expectedOutcomeId) || loadedScenario.expectedOutcomeId : 'None saved'}</p>
+                <p>Actual outcome: {evaluation.ok ? (evaluation.outcomeId ? outcomeLabel.get(evaluation.outcomeId) || evaluation.outcomeId : 'None resolved') : 'Unavailable (evaluation failed)'}</p>
+              </div>
+              {loadedScenario.expectedOutcomeId && evaluation.ok && evaluation.outcomeId !== loadedScenario.expectedOutcomeId && (
+                <p className="text-caption-1-regular text-text-error-primary">The actual outcome does not match this scenario’s expected outcome.</p>
+              )}
             </div>
           )}
 
@@ -650,6 +916,16 @@ export const TestRunner: React.FC<TestRunnerProps> = ({
           )}
         </div>
       )}
+
+      <AlertDialog
+        isOpen={deleteScenario !== null}
+        onOpenChange={(isOpen) => { if (!isOpen && !scenarioDeleting) setDeleteScenario(null); }}
+        title="Delete saved scenario?"
+        description={deleteScenario ? `“${deleteScenario.name}” will be removed from this rule set.` : undefined}
+        confirmLabel="Delete scenario"
+        pendingLabel="Deleting…"
+        onConfirm={handleConfirmDeleteScenario}
+      />
     </div>
   );
 };
